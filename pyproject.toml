@@ -105,6 +105,7 @@ pytest = "^8.0.2"
 pytest-xdist = "^3.5.0"
 psutil = "^5.9.8"  # needed only for memory leak testing.
 jsonref = "^1.1.0"
+jsonnet = "^0.21.0"
 
 # Extras for internal development
 openapi-spec-validator = {version = "^0.7.1", optional = true}

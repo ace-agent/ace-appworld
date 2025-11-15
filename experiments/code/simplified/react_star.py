@@ -11,7 +11,6 @@ from appworld.common.utils import read_file
 from appworld_experiments.code.simplified.star_agent import StarAgent, ExecutionIO
 from .playbook import apply_curator_operations, extract_json_from_text, get_next_global_id
 
-
 @StarAgent.register("simplified_react_star")
 class SimplifiedReActStarAgent(StarAgent):
     def __init__(
@@ -104,11 +103,12 @@ class SimplifiedReActStarAgent(StarAgent):
                 len(last_execution_outputs) == 1
             ), "React expects exactly one last_execution_output."
             last_execution_output_content = last_execution_outputs[0].content
-            maybe_new_line = ""  # Update this to ^ because of "Execution Successful." Original code did not do it.
+            potential_new_line = ""
             last_execution_output_content = (
-                "Output:\n```\n" + self.truncate_output(last_execution_output_content) + maybe_new_line + "```\n\n"
+                "Output:\n```\n" + self.truncate_output(last_execution_output_content) + potential_new_line + "```\n\n"
             )
             self.messages.append({"role": "user", "content": last_execution_output_content})
+        
         messages = self.trimmed_messages
         output = self.generator_model.generate(messages=messages)
         code, fixed_output_content = self.extract_code_and_fix_content(output["content"])
@@ -130,13 +130,13 @@ class SimplifiedReActStarAgent(StarAgent):
                 return code, text
             output_code += code + "\n"
             match_end = re_match.end()
-        # check for partial code match at end (no terminating ```)  following the last match
+        # Check for partial code match at end (no terminating ```)  following the last match
         partial_match = re.match(
             self.partial_code_regex, original_text[match_end:], flags=re.DOTALL
         )
         if partial_match:
             output_code += partial_match.group(1).strip()
-            # terminated due to stop condition. Add stop condition to output.
+            # Terminated due to stop condition; add stop condition to output
             if not text.endswith("\n"):
                 text = text + "\n"
             text = text + "```"
@@ -242,7 +242,9 @@ class SimplifiedReActStarAgent(StarAgent):
         return messages
     
     def reflector_call(self):
-        # 简单粗暴：直接把所有messages和ground truth放进去让reflector自己处理
+        """
+        Let the reflector generate insights based on the full conversation history, i.e. all messages and ground truths (if any).
+        """
         filled_prompt = (
             self.star_prompt
             .replace("{{ground_truth_code}}", self.world_gt_code or "")
@@ -255,7 +257,7 @@ class SimplifiedReActStarAgent(StarAgent):
             .replace("{{previous_reflection}}", "N/A")
         )
         
-        # 添加完整的对话历史
+        # add full conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
         for i, msg in enumerate(self.trimmed_messages):
             role = msg.get("role", "unknown")
@@ -264,17 +266,15 @@ class SimplifiedReActStarAgent(StarAgent):
         
         filled_prompt += conversation_history
 
-
         message_ = self.reflector_curator_model.generate(messages=[{"role": "user", "content": filled_prompt}])
         reasoning_text = message_.get("content", "")
         self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
 
         return reasoning_text
-
     
     def curator_call(self):
         """
-        简单粗暴：直接把所有messages和reflection放进去让curator自己处理
+        Let the curator update the playbook based on the full conversation history, i.e. all messages and reflections.
         """
         
         reasoning_text = None
@@ -282,10 +282,10 @@ class SimplifiedReActStarAgent(StarAgent):
             reasoning_text = self.reflector_call()
         # Current playbook and question context
         current_playbook = self.playbook or ""
-        question_context   = getattr(getattr(self, "world", None), "task", None)
-        question_context   = getattr(question_context, "instruction", "") if question_context else ""
+        question_context = getattr(getattr(self, "world", None), "task", None)
+        question_context = getattr(question_context, "instruction", "") if question_context else ""
 
-        # 添加完整的对话历史
+        # add conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
         for i, msg in enumerate(self.trimmed_messages):
             role = msg.get("role", "unknown")
@@ -380,4 +380,3 @@ class SimplifiedReActStarAgent(StarAgent):
             file.write(self.playbook)
 
         self.logger.show_message(role="user", message=curator_response, step_number=self.step_number)
-        

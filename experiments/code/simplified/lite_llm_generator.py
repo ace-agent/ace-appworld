@@ -30,9 +30,6 @@ from appworld import AppWorld
 from appworld.common.path_store import path_store
 from appworld.common.utils import rprint, write_jsonl
 
-from together import Together
-
-
 litellm.drop_params = True
 cache = Memory(os.path.join(path_store.cache, "llm_calls"), verbose=0)
 
@@ -57,14 +54,9 @@ CHAT_COMPLETION = {  # These are lambda so set environment variables take effect
     "litellm": lambda: litellm.completion,
 }
 
-"""
-Observation:
-
-openai api_key, url need not be hardcoded. Explore better ways.
-
-"""
 def non_cached_chat_completion(
     completion_method: str,
+    provider: str,
     model: str,
     messages: list[dict[str, str]],
     frequency_penalty: float | None = None,
@@ -151,7 +143,19 @@ def non_cached_chat_completion(
     # # completion = client.chat.completions.create(
     # response = client.chat.completions.create(**kwargs)
 
-    client = Together()
+    if provider.strip().lower() == "sambanova":
+        from sambanova import SambaNova
+        client = SambaNova()
+    elif provider.strip().lower() == "together":
+        from together import Together
+        client = Together()
+    elif provider.strip().lower() == "openai":
+        from openai import OpenAI
+        client = OpenAI()
+    else:
+        raise ValueError(
+            f"Invalid provider: {provider}."
+        )
 
     response = client.chat.completions.create(**kwargs)
     response = to_dict(response)
@@ -161,6 +165,7 @@ def non_cached_chat_completion(
 @cache.cache
 def cached_chat_completion(
     completion_method: str,
+    provider: str,
     model: str,
     messages: list[dict[str, str]],
     frequency_penalty: float | None = None,
@@ -193,6 +198,7 @@ def cached_chat_completion(
 
     return non_cached_chat_completion(
         completion_method=completion_method,
+        provider=provider,
         model=model,
         messages=messages,
         frequency_penalty=frequency_penalty,

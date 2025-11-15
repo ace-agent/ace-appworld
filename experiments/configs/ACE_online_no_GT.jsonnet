@@ -1,8 +1,12 @@
-local experiment_prompts_path = std.extVar("APPWORLD_EXPERIMENT_PROMPTS_PATH");
-local experiment_configs_path = std.extVar("APPWORLD_EXPERIMENT_CONFIGS_PATH");
-local experiment_code_path = std.extVar("APPWORLD_EXPERIMENT_CODE_PATH");
+local project_home_path = std.extVar("APPWORLD_PROJECT_PATH");
+local experiment_prompts_path = project_home_path + "/experiments/prompts";
+local experiment_playbooks_path = project_home_path + "/experiments/playbooks";
+local experiment_configs_path = project_home_path + "/experiments/configs";
+local experiment_code_path = project_home_path + "/experiments/code";
+
 local reflector_curator_model_config = {
     "name": "deepseek-ai/DeepSeek-V3.1",
+    "provider": "together",
     "temperature": 0,
     "seed": 100,
     "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],
@@ -16,8 +20,10 @@ local reflector_curator_model_config = {
     "use_cache": true,
     "max_retries": 50,
 };
+
 local gen_model_config = {
     "name": "deepseek-ai/DeepSeek-V3.1",
+    "provider": "together",
     "temperature": 0,
     "seed": 100,
     "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],

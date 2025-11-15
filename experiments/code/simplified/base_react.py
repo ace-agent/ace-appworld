@@ -11,7 +11,6 @@ from appworld.common.utils import read_file
 from appworld_experiments.code.simplified.agent import Agent, ExecutionIO
 from appworld_experiments.code.simplified.base_agent import BaseAgent, ExecutionIO
 
-
 @BaseAgent.register("simplified_base_react")
 class BaseSimplifiedReActAgent(BaseAgent):
     def __init__(

@@ -10,7 +10,6 @@ from appworld import AppWorld
 from appworld.common.utils import read_file
 from appworld_experiments.code.simplified.agent import Agent, ExecutionIO
 
-
 @Agent.register("simplified_react")
 class SimplifiedReActAgent(Agent):
     def __init__(
@@ -64,15 +63,9 @@ class SimplifiedReActAgent(Agent):
                 len(last_execution_outputs) == 1
             ), "React expects exactly one last_execution_output."
             last_execution_output_content = last_execution_outputs[0].content
-            # self.logger.show_message(
-            #     role="environment",
-            #     message=last_execution_output_content,
-            #     step_number=self.step_number,
-            # )
-            # maybe_new_line = "\n" if not last_execution_output.endswith("\n") else ""
-            maybe_new_line = ""  # Update this to ^ because of "Execution Successful." Original code did not do it.
+            potential_new_line = ""
             last_execution_output_content = (
-                "Output:\n```\n" + self.truncate_output(last_execution_output_content) + maybe_new_line + "```\n\n"
+                "Output:\n```\n" + self.truncate_output(last_execution_output_content) + potential_new_line + "```\n\n"
             )
             self.messages.append({"role": "user", "content": last_execution_output_content})
         messages = self.trimmed_messages
@@ -96,13 +89,13 @@ class SimplifiedReActAgent(Agent):
                 return code, text
             output_code += code + "\n"
             match_end = re_match.end()
-        # check for partial code match at end (no terminating ```)  following the last match
+        # Check for partial code match at end (no terminating ```)  following the last match
         partial_match = re.match(
             self.partial_code_regex, original_text[match_end:], flags=re.DOTALL
         )
         if partial_match:
             output_code += partial_match.group(1).strip()
-            # terminated due to stop condition. Add stop condition to output.
+            # Terminated due to stop condition; add stop condition to output
             if not text.endswith("\n"):
                 text = text + "\n"
             text = text + "```"
@@ -133,7 +126,6 @@ class SimplifiedReActAgent(Agent):
         if len(execution_output_content) > 20000:
             execution_output_content = execution_output_content[:20000] + "\n[REST NOT SHOWN FOR BREVITY]"
         return execution_output_content
-
 
     def text_to_messages(self, input_str: str) -> list[dict]:
         messages_json = []

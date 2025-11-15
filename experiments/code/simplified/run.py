@@ -18,25 +18,23 @@ def run_experiment(
     sample_size = runner_config.pop("sample_size", None)
     custom_task_ids = runner_config.pop("task_ids", None)
     num_epochs = runner_config.pop("num_epochs", 1)
+    
     if runner_config:
         raise Exception(f"Unexpected keys in the runner config: {runner_config}")
     
     if task_id:
-        # execute single task
-        task_ids = [task_id]
+        task_ids = [task_id] # execute a single task
     elif custom_task_ids:
-        # use custom task list
-        task_ids = custom_task_ids
+        task_ids = custom_task_ids # use a custom list of tasks
         print(f"Using custom task list: {len(task_ids)} tasks")
     else:
-        # use dataset
         if dataset_name is None:
             raise Exception("Either 'dataset' or 'task_ids' must be specified in the config")
         task_ids = load_task_ids(dataset_name)
         if sample_size is not None:
             task_ids = task_ids[:sample_size]
 
-    # Done to assure all the tasks can be loaded fine without running any of them.
+    # Make sure all the tasks can be loaded without running any of them
     for task_id in task_ids:
         Task.load(task_id=task_id)
 
