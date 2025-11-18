@@ -78,6 +78,8 @@ class SimplifiedReActAgent(Agent):
         return [ExecutionIO(content=code)], output["cost"], None
 
     def extract_code_and_fix_content(self, text: str) -> tuple[str, str]:
+        if text is None:
+            return "", ""
         original_text = text
         output_code = ""
         match_end = 0

@@ -359,13 +359,19 @@ class SimplifiedReActStarAgent(StarAgent):
             )
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
             print(f"❌ Curator JSON parsing failed: {e}")
-            print(f"📄 Raw curator response preview: {curator_response[:300]}...")
+            if curator_response is not None:
+                print(f"📄 Raw curator response preview: {curator_response[:300]}...")
+            else:
+                print(f"📄 Raw curator response preview: None")
             
             print("⏭️  Skipping curator operation due to invalid JSON format")
             # Don't update playbook - continue with existing playbook    
         except Exception as e:
             print(f"❌ Curator operation failed: {e}")
-            print(f"📄 Raw curator response preview: {curator_response[:300]}...")
+            if curator_response is not None:
+                print(f"📄 Raw curator response preview: {curator_response[:300]}...")
+            else:
+                print(f"📄 Raw curator response preview: None")
             
             print("⏭️  Skipping curator operation and continuing training")
 
@@ -373,4 +379,7 @@ class SimplifiedReActStarAgent(StarAgent):
         with open(self.trained_playbook_file_path, "w") as file:
             file.write(self.playbook)
 
-        self.logger.show_message(role="user", message=curator_response, step_number=self.step_number)
+        if curator_response is not None:
+            self.logger.show_message(role="user", message=curator_response, step_number=self.step_number)
+        else:
+            self.logger.show_message(role="user", message="[WARN] curator_response is None", step_number=self.step_number)
