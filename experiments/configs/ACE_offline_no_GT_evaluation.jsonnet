@@ -36,7 +36,7 @@ local generator_model_config = {
                 "verbose": true,
             },
             "generator_prompt_file_path": experiment_prompts_path + "/appworld_react_generator_prompt.txt",
-            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_no_gt_playbook.txt",  
+            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_no_gt_playbook_deepseek_3_1.txt",  
             "ignore_multiple_calls": true,
             "max_steps": 40,
             "max_cost_overall": 1000,
