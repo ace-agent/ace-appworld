@@ -24,7 +24,6 @@ local generator_model_config = {
 {
     "type": "gepa",
     "config": {
-        "run_type": "gepa-adaptation",
         "agent": {
             "type": "gepa_react",
             "generator_model_config": generator_model_config,
@@ -41,7 +40,6 @@ local generator_model_config = {
             "max_cost_overall": 1000,
             "max_cost_per_task": 10,
             "log_lm_calls": true,
-        },
-        "dataset": "train",
+        }
     }
 }
