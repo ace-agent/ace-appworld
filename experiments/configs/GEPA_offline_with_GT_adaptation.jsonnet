@@ -1,3 +1,4 @@
+# Not used for appworld training run, only used for initialization of agent in GEPA
 local project_home_path = std.extVar("APPWORLD_PROJECT_PATH");
 local experiment_prompts_path = project_home_path + "/experiments/prompts";
 local experiment_playbooks_path = project_home_path + "/experiments/playbooks";
