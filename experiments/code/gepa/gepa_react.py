@@ -34,6 +34,9 @@ class GEPAReActAgent(GEPAAgent):
         self.playbook = None
         self.gepa_prompt_replace = None
 
+    def replace_gepa_prompt(self, prompt: str):
+        self.gepa_prompt_replace = prompt
+
     def initialize(self, world: AppWorld):
         super().initialize(world)
         template = Template(self.generator_prompt_template)
