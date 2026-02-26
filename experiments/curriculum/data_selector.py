@@ -15,15 +15,27 @@ Usage (run from repository root):
 
     # Easy-preferred (prefers easy, uses closest as fallback)
     python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --cluster cosine:0.8 --examples-per-cluster 2 --difficulty easy-preferred
+
+    # LLM evaluation-based selection (selects incorrectly answered tasks)
+    python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_failed.txt --llm-eval --model-name "deepseek-ai/DeepSeek-V3.1" --provider together
 """
 
 import argparse
 import json
 import random
+import os
+import sys
 from pathlib import Path
 from typing import List, Tuple, Dict
+from datetime import datetime
 
 from similarity_metrics import calculate_similarity, compute_embeddings_batch, compute_idf_scores
+
+# Add parent directories to path to import ace modules
+# experiments directory contains appworld_experiments package
+sys.path.insert(0, str(Path(__file__).parent.parent))
+# src directory contains appworld package
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 
 def load_dataset(dataset_name: str) -> List[str]:
@@ -531,42 +543,193 @@ def print_summary(task_pairs: List[Tuple[str, int]]):
     print(f"  Hard (Level 3):   {counts[3]:3d} ({counts[3]/total*100:5.1f}%)")
 
 
+def run_llm_evaluation(
+    task_ids: List[str],
+    model_name: str,
+    provider: str,
+    experiment_name: str,
+    max_cost_overall: float = 1000.0,
+    max_cost_per_task: float = 10.0,
+    max_steps: int = 40,
+    temperature: float = 0.0,
+    use_cache: bool = True,
+) -> Tuple[List[str], Dict[str, Dict]]:
+    """Run LLM evaluation on tasks and return failed task IDs and detailed results.
+
+    Args:
+        task_ids: List of task IDs to evaluate
+        model_name: Name of the LLM model (e.g., "deepseek-ai/DeepSeek-V3.1")
+        provider: Provider name (e.g., "together", "openai", "sambanova")
+        experiment_name: Name for the experiment (used to create output folder)
+        max_cost_overall: Maximum overall cost limit
+        max_cost_per_task: Maximum cost per task
+        max_steps: Maximum number of steps per task
+        temperature: Temperature for LLM generation
+        use_cache: Whether to use caching
+
+    Returns:
+        Tuple of (failed_task_ids, task_results_dict)
+    """
+    from datetime import datetime
+
+    print(f"\n=== LLM EVALUATION MODE ===")
+    print(f"Model: {model_name}")
+    print(f"Provider: {provider}")
+    print(f"Experiment name: {experiment_name}")
+    print(f"Tasks to evaluate: {len(task_ids)}")
+
+    # Import required modules
+    try:
+        from appworld_experiments.code.ace.evaluation_agent import Agent
+        from appworld.evaluator import evaluate_task
+    except ImportError as e:
+        print(f"Error importing required modules: {e}")
+        print("Make sure you're running from the repository root and all dependencies are installed.")
+        sys.exit(1)
+
+    # Find the generator prompt and playbook files
+    # These are required for SimplifiedReActAgent
+    prompt_file = "experiments/prompts/appworld_react_generator_prompt.txt"
+    playbook_file = "experiments/playbooks/appworld_offline_trained_no_gt_playbook.txt"
+
+    # Check if files exist
+    if not Path(prompt_file).exists():
+        print(f"Error: Generator prompt file not found: {prompt_file}")
+        sys.exit(1)
+    if not Path(playbook_file).exists():
+        print(f"Error: Playbook file not found: {playbook_file}")
+        sys.exit(1)
+
+    # Create agent configuration
+    agent_config = {
+        "type": "ace_evaluation_react",
+        "generator_prompt_file_path": prompt_file,
+        "trained_playbook_file_path": playbook_file,
+        "generator_model_config": {
+            "name": model_name,
+            "provider": provider,
+            "temperature": temperature,
+            "use_cache": use_cache,
+            "max_retries": 50,
+            "seed": 100,
+        },
+        "appworld_config": {
+            "random_seed": 123,
+        },
+        "logger_config": {
+            "color": True,
+            "verbose": True,
+        },
+        "max_steps": max_steps,
+        "max_cost_overall": max_cost_overall,
+        "max_cost_per_task": max_cost_per_task,
+        "log_lm_calls": True,
+    }
+
+    # Initialize agent using the registry system
+    print("Initializing agent...")
+    agent = Agent.from_dict(agent_config)
+
+    # Run evaluation on all tasks
+    print(f"\nRunning evaluation on {len(task_ids)} tasks...")
+    agent.solve_tasks(
+        task_ids=task_ids,
+        experiment_name=experiment_name,
+        num_processes=1,
+        process_index=0,
+    )
+
+    print("\nEvaluating task results...")
+    # Collect evaluation results
+    task_results = {}
+    failed_task_ids = []
+
+    for task_id in task_ids:
+        try:
+            # Evaluate the task
+            test_tracker = evaluate_task(
+                task_id=task_id,
+                experiment_name=experiment_name,
+                suppress_errors=True,
+                save_report=True,
+            )
+
+            # Convert to dict for storage
+            result_dict = test_tracker.to_dict(stats_only=False)
+            task_results[task_id] = result_dict
+
+            # Check if task failed
+            if not result_dict.get("success", False):
+                failed_task_ids.append(task_id)
+                print(f"  ✗ {task_id} - FAILED")
+            else:
+                print(f"  ✓ {task_id} - PASSED")
+
+        except Exception as e:
+            print(f"  ✗ {task_id} - ERROR: {e}")
+            task_results[task_id] = {
+                "success": False,
+                "error": str(e),
+            }
+            failed_task_ids.append(task_id)
+
+    print(f"\nEvaluation complete:")
+    print(f"  Total tasks: {len(task_ids)}")
+    print(f"  Passed: {len(task_ids) - len(failed_task_ids)}")
+    print(f"  Failed: {len(failed_task_ids)}")
+
+    return failed_task_ids, task_results
+
+
+def save_evaluation_results(
+    task_results: Dict[str, Dict],
+    experiment_name: str,
+    dataset_name: str,
+) -> Path:
+    """Save detailed evaluation results to a JSON file in the datasets folder.
+
+    Args:
+        task_results: Dictionary mapping task_id to evaluation result dict
+        experiment_name: Name of the experiment
+        dataset_name: Name of the original dataset
+
+    Returns:
+        Path to the saved results file
+    """
+    from datetime import datetime
+
+    # Create results directory under datasets
+    results_dir = Path("data/datasets/llm_eval_results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{experiment_name}_{dataset_name.replace('.txt', '')}_{timestamp}.json"
+    results_path = results_dir / filename
+
+    # Prepare full results with metadata
+    full_results = {
+        "experiment_name": experiment_name,
+        "dataset_name": dataset_name,
+        "timestamp": timestamp,
+        "total_tasks": len(task_results),
+        "failed_tasks": sum(1 for r in task_results.values() if not r.get("success", False)),
+        "passed_tasks": sum(1 for r in task_results.values() if r.get("success", False)),
+        "task_results": task_results,
+    }
+
+    # Save to file
+    with open(results_path, 'w') as f:
+        json.dump(full_results, f, indent=2)
+
+    print(f"\nDetailed results saved to: {results_path}")
+    return results_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Select and reorder tasks from a dataset file",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Standard selection with difficulty and size
-  python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --size 50 --difficulty balanced --order easy-to-hard
-
-  # Cluster-based selection (ignores --size, respects --difficulty)
-  # No difficulty filter - select from all difficulties
-  python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --cluster cosine:0.8 --examples-per-cluster 2 --order original
-
-  # Easy-only mode - strict, errors if not enough easy samples
-  python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --cluster oracle --examples-per-cluster 3 --difficulty easy-only --order original
-
-  # Easy-preferred mode - prefers easy, falls back to closest if unavailable
-  python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --cluster cosine:0.8 --examples-per-cluster 2 --difficulty easy-preferred --order original
-
-  # Balanced mode - tries to maintain 1:1:1 ratio across difficulties
-  python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --cluster oracle --examples-per-cluster 3 --difficulty balanced --order easy-to-hard
-
-Available similarity metrics for --cluster:
-  - jaccard: Word-based set similarity
-  - cosine: TF-IDF cosine similarity
-  - levenshtein: Character-level edit distance
-  - oracle: Ground truth clustering using task family IDs (threshold ignored)
-  - embedding: Semantic similarity using OpenAI embeddings (requires OPENAI_API_KEY)
-
-Difficulty modes:
-  - None (default): No filtering, select from all difficulties
-  - easy-only/medium-only/hard-only: Strict mode, requires exact matches (throws error if unavailable)
-  - easy-preferred/medium-preferred/hard-preferred: Prefers difficulty, allows closest match as fallback
-  - balanced: Tries to maintain 1:1:1 ratio across all three difficulty levels
-  - custom: Custom ratio specified with --ratio (e.g., --ratio 1:2:1 for easy:medium:hard)
-        """
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--dataset",
@@ -635,11 +798,64 @@ Difficulty modes:
         default="text-embedding-3-large",
         help="Embedding model to use when --cluster uses 'embedding' metric (default: text-embedding-3-large)"
     )
+    parser.add_argument(
+        "--llm-eval",
+        action="store_true",
+        help="Enable LLM evaluation mode: run base LLM on tasks and select failed ones"
+    )
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        default=None,
+        help="LLM model name for evaluation (e.g., 'deepseek-ai/DeepSeek-V3.1')"
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="together",
+        help="LLM provider for evaluation (e.g., 'together', 'openai', 'sambanova')"
+    )
+    parser.add_argument(
+        "--experiment-name",
+        type=str,
+        default=None,
+        help="Experiment name for LLM evaluation (used to create output folder)"
+    )
+    parser.add_argument(
+        "--max-cost-overall",
+        type=float,
+        default=1000.0,
+        help="Maximum overall cost for LLM evaluation (default: 1000.0)"
+    )
+    parser.add_argument(
+        "--max-cost-per-task",
+        type=float,
+        default=10.0,
+        help="Maximum cost per task for LLM evaluation (default: 10.0)"
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=40,
+        help="Maximum steps per task for LLM evaluation (default: 40)"
+    )
 
     args = parser.parse_args()
 
     # Validate arguments
-    if args.cluster:
+    if args.llm_eval:
+        # LLM evaluation mode
+        if not args.model_name:
+            parser.error("--model-name is required when using --llm-eval")
+        if not args.experiment_name:
+            # Generate default experiment name
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            args.experiment_name = f"llm_eval_{timestamp}"
+            print(f"No experiment name provided, using: {args.experiment_name}")
+        if args.cluster or args.size or args.examples_per_cluster:
+            print("Warning: --cluster, --size, and --examples-per-cluster are ignored in --llm-eval mode")
+    elif args.cluster:
         if not args.examples_per_cluster:
             parser.error("--examples-per-cluster is required when using --cluster")
         if args.size:
@@ -655,8 +871,42 @@ Difficulty modes:
     task_ids = load_dataset(args.dataset)
     print(f"Found {len(task_ids)} tasks")
 
-    # Branch based on clustering mode
-    if args.cluster:
+    # Branch based on mode
+    if args.llm_eval:
+        # LLM evaluation mode: run LLM on tasks and select failed ones
+        failed_task_ids, task_results = run_llm_evaluation(
+            task_ids=task_ids,
+            model_name=args.model_name,
+            provider=args.provider,
+            experiment_name=args.experiment_name,
+            max_cost_overall=args.max_cost_overall,
+            max_cost_per_task=args.max_cost_per_task,
+            max_steps=args.max_steps,
+            temperature=0.0,
+            use_cache=True,
+        )
+
+        # Save detailed evaluation results
+        save_evaluation_results(
+            task_results=task_results,
+            experiment_name=args.experiment_name,
+            dataset_name=args.dataset,
+        )
+
+        # Get difficulty information for failed tasks
+        failed_pairs = get_tasks_with_difficulty(failed_task_ids)
+
+        # Print summary
+        print_summary(failed_pairs)
+
+        # Save failed task IDs to output file
+        save_dataset(failed_task_ids, args.output)
+
+        print(f"\nLLM evaluation mode complete!")
+        print(f"Failed task IDs saved to: data/datasets/{args.output}")
+        return
+
+    elif args.cluster:
         # Parse cluster argument
         if ':' in args.cluster:
             parts = args.cluster.split(':', 1)
