@@ -646,8 +646,8 @@ def run_llm_evaluation(
 
     for task_id in task_ids:
         try:
-            # Evaluate the task
-            test_tracker = evaluate_task(
+            # Evaluate the task (returns tuple: test_tracker, report)
+            test_tracker, report = evaluate_task(
                 task_id=task_id,
                 experiment_name=experiment_name,
                 suppress_errors=True,
