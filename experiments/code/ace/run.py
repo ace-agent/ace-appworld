@@ -37,9 +37,7 @@ def run_experiment(
     # Make sure all the tasks can be loaded without running any of them
     for task_id in task_ids:
         Task.load(task_id=task_id)
-
     task_ids = task_ids * num_epochs
-
     if run_type == "ace-adaptation":
         # ACE adaptation
         agent = StarAgent.from_dict(agent_config)
@@ -51,7 +49,6 @@ def run_experiment(
         agent = BaseAgent.from_dict(agent_config)
     else:
         raise ValueError(f"Unknown run_type: {run_type}")
-
     agent.solve_tasks(
         task_ids=task_ids,
         experiment_name=experiment_name,

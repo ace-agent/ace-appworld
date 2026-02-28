@@ -82,6 +82,7 @@ class Agent(FromDict):
             for _ in range(self.max_steps):
                 self.step_number += 1
                 execution_inputs, cost, reflection = self.next_execution_inputs_and_cost(execution_outputs, "")
+                breakpoint()
                 if reflection:
                     reflections.append(reflection)
 
