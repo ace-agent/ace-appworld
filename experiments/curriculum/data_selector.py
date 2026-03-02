@@ -16,6 +16,15 @@ Usage (run from repository root):
     # Easy-preferred (prefers easy, uses closest as fallback)
     python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_subset.txt --cluster cosine:0.8 --examples-per-cluster 2 --difficulty easy-preferred
 
+    # Playbook-based clustering (clusters tasks by generated playbook similarity)
+    python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_playbook_cluster.txt --playbook-cluster cosine:0.8 --playbook-dir experiments/playbooks/run_once_parallel_0302 --examples-per-cluster 2
+
+    # Playbook clustering with oracle (by task family)
+    python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_playbook_oracle.txt --playbook-cluster oracle --playbook-dir experiments/playbooks/run_once_parallel_0302 --examples-per-cluster 3
+
+    # Playbook clustering with embedding similarity
+    python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_playbook_embed.txt --playbook-cluster embedding:0.9 --playbook-dir experiments/playbooks/run_once_parallel_0302 --examples-per-cluster 2 --embedding-model text-embedding-3-large
+
     # LLM evaluation-based selection (selects incorrectly answered tasks)
     python3 experiments/curriculum/data_selector.py --dataset train.txt --output train_failed.txt --llm-eval --model-name "deepseek-ai/DeepSeek-V3.1" --provider together
 """
@@ -726,6 +735,208 @@ def save_evaluation_results(
     return results_path
 
 
+def load_playbook(playbook_path: Path) -> str:
+    """Load playbook content from file."""
+    try:
+        with open(playbook_path, 'r') as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"Warning: Could not read playbook {playbook_path}: {e}")
+        return ""
+
+
+def parse_run_once_stats(stats_file: Path) -> Dict[str, Dict]:
+    """Parse run_once_stats.txt file to get task IDs and playbook filenames.
+
+    Returns:
+        Dict mapping task_id to {'playbook_file': str, 'correct': bool, 'lines': int}
+    """
+    task_info = {}
+
+    with open(stats_file, 'r') as f:
+        lines = f.readlines()
+
+    # Skip header lines
+    in_data_section = False
+    for line in lines:
+        line = line.strip()
+
+        # Start reading after the header separator
+        if line.startswith('----'):
+            in_data_section = True
+            continue
+
+        # Stop at summary section
+        if in_data_section and (line.startswith('====') or line.startswith('SUMMARY')):
+            break
+
+        if in_data_section and line:
+            # Parse line: task_id, correct, playbook_file, lines
+            parts = line.split()
+            if len(parts) >= 4:
+                task_id = parts[0]
+                correct = parts[1] == '✓'
+                playbook_file = parts[2]
+                try:
+                    num_lines = int(parts[3])
+                except (ValueError, IndexError):
+                    num_lines = 0
+
+                task_info[task_id] = {
+                    'playbook_file': playbook_file,
+                    'correct': correct,
+                    'lines': num_lines
+                }
+
+    return task_info
+
+
+def cluster_tasks_by_playbook_similarity(
+    playbook_dir: Path,
+    stats_file: Path,
+    similarity_metric: str,
+    threshold: float,
+    embedding_model: str = "text-embedding-3-large"
+) -> List[List[Dict]]:
+    """Cluster tasks by playbook similarity using the same method as instruction clustering.
+
+    Args:
+        playbook_dir: Directory containing playbook files
+        stats_file: Path to run_once_stats.txt file
+        similarity_metric: 'cosine', 'embedding', or 'oracle' (oracle uses task family)
+        threshold: Similarity threshold for clustering
+        embedding_model: Model to use for embedding-based similarity
+
+    Returns:
+        List of clusters, where each cluster is a list of dicts with 'task_id', 'playbook',
+        'correct', 'lines', and 'original_index' keys.
+    """
+    print(f"Reading playbooks from {playbook_dir}...")
+
+    # Parse stats file to get task info
+    task_info = parse_run_once_stats(stats_file)
+    print(f"Found {len(task_info)} tasks in stats file")
+
+    # Build task data with playbooks
+    task_data = []
+    for idx, (task_id, info) in enumerate(sorted(task_info.items())):
+        playbook_path = playbook_dir / info['playbook_file']
+        playbook_content = load_playbook(playbook_path)
+
+        if playbook_content:  # Only include tasks with non-empty playbooks
+            # Get difficulty from task metadata
+            difficulty = get_task_difficulty(task_id)
+
+            task_data.append({
+                'task_id': task_id,
+                'playbook': playbook_content,
+                'difficulty': difficulty,
+                'correct': info['correct'],
+                'lines': info['lines'],
+                'original_index': idx
+            })
+
+    if not task_data:
+        print("Warning: No valid playbooks found for clustering")
+        return []
+
+    print(f"Found {len(task_data)} tasks with non-empty playbooks")
+
+    # Handle oracle clustering (by task family ID)
+    if similarity_metric == "oracle":
+        from similarity_metrics import extract_task_family_id
+
+        family_to_tasks = {}
+        for task in task_data:
+            family_id = extract_task_family_id(task['task_id'])
+            if family_id not in family_to_tasks:
+                family_to_tasks[family_id] = []
+            family_to_tasks[family_id].append(task)
+
+        # Sort each cluster by original index to preserve order
+        clusters = []
+        for family_id in sorted(family_to_tasks.keys()):
+            cluster = sorted(family_to_tasks[family_id], key=lambda x: x['original_index'])
+            clusters.append(cluster)
+
+        return clusters
+
+    # For other metrics, cluster by playbook similarity
+    # Build playbook to tasks mapping
+    playbook_to_tasks = {}
+    for task in task_data:
+        playbook = task['playbook']
+        if playbook not in playbook_to_tasks:
+            playbook_to_tasks[playbook] = []
+        playbook_to_tasks[playbook].append(task)
+
+    playbooks = list(playbook_to_tasks.keys())
+
+    # Prepare metric-specific data
+    idf_scores = None
+    embeddings_cache = None
+    api_key = None
+
+    if similarity_metric == "cosine":
+        print("Computing IDF scores for playbooks...")
+        idf_scores = compute_idf_scores(playbooks)
+    elif similarity_metric == "embedding":
+        print(f"Computing embeddings for {len(playbooks)} unique playbooks using model '{embedding_model}'...")
+        import os
+        api_key = os.environ.get("OPENAI_API_KEY")
+        embeddings_cache = compute_embeddings_batch(playbooks, api_key, model=embedding_model)
+        print("Embeddings computed successfully")
+
+    # Clustering based on similarity
+    clusters = []
+    clustered = set()
+
+    for i, pb1 in enumerate(playbooks):
+        if pb1 in clustered:
+            continue
+
+        cluster_playbooks = [pb1]
+        clustered.add(pb1)
+
+        for pb2 in playbooks[i+1:]:
+            if pb2 in clustered:
+                continue
+
+            # Check similarity with any playbook in current cluster
+            is_similar = False
+            for cluster_pb in cluster_playbooks:
+                sim_score = calculate_similarity(
+                    cluster_pb, pb2, similarity_metric,
+                    idf_scores=idf_scores,
+                    embeddings_cache=embeddings_cache,
+                    api_key=api_key
+                )
+                if sim_score >= threshold:
+                    is_similar = True
+                    break
+
+            if is_similar:
+                cluster_playbooks.append(pb2)
+                clustered.add(pb2)
+
+        # Collect all tasks for this cluster and sort by original index
+        cluster_tasks = []
+        for playbook in cluster_playbooks:
+            cluster_tasks.extend(playbook_to_tasks[playbook])
+
+        cluster_tasks.sort(key=lambda x: x['original_index'])
+        clusters.append(cluster_tasks)
+
+    # Sort clusters by the minimum original index in each cluster
+    clusters.sort(key=lambda cluster: min(task['original_index'] for task in cluster))
+
+    print(f"Created {len(clusters)} playbook clusters")
+    for i, cluster in enumerate(clusters):
+        print(f"  Cluster {i+1}: {len(cluster)} tasks")
+
+    return clusters
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Select and reorder tasks from a dataset file",
@@ -839,6 +1050,18 @@ def main():
         default=40,
         help="Maximum steps per task for LLM evaluation (default: 40)"
     )
+    parser.add_argument(
+        "--playbook-cluster",
+        type=str,
+        default=None,
+        help="Enable playbook-based clustering with format 'metric:threshold' (e.g., 'cosine:0.8', 'embedding:0.9', 'oracle'). Requires --playbook-dir."
+    )
+    parser.add_argument(
+        "--playbook-dir",
+        type=str,
+        default=None,
+        help="Directory containing playbook files and run_once_stats.txt (required when using --playbook-cluster)"
+    )
 
     args = parser.parse_args()
 
@@ -855,6 +1078,18 @@ def main():
             print(f"No experiment name provided, using: {args.experiment_name}")
         if args.cluster or args.size or args.examples_per_cluster:
             print("Warning: --cluster, --size, and --examples-per-cluster are ignored in --llm-eval mode")
+    elif args.playbook_cluster:
+        # Playbook clustering mode
+        if not args.playbook_dir:
+            parser.error("--playbook-dir is required when using --playbook-cluster")
+        if not args.examples_per_cluster:
+            parser.error("--examples-per-cluster is required when using --playbook-cluster")
+        if args.cluster:
+            print("Warning: --cluster is ignored when using --playbook-cluster mode")
+        if args.size:
+            print("Warning: --size is ignored when using --playbook-cluster mode")
+        if args.dataset:
+            print("Warning: --dataset is ignored when using --playbook-cluster mode (task IDs come from playbook stats)")
     elif args.cluster:
         if not args.examples_per_cluster:
             parser.error("--examples-per-cluster is required when using --cluster")
@@ -866,10 +1101,11 @@ def main():
         if args.examples_per_cluster:
             print("Warning: --examples-per-cluster is ignored when not using --cluster mode")
 
-    # Load dataset
-    print(f"Loading dataset: {args.dataset}")
-    task_ids = load_dataset(args.dataset)
-    print(f"Found {len(task_ids)} tasks")
+    # Load dataset (skip for playbook clustering mode)
+    if not args.playbook_cluster:
+        print(f"Loading dataset: {args.dataset}")
+        task_ids = load_dataset(args.dataset)
+        print(f"Found {len(task_ids)} tasks")
 
     # Branch based on mode
     if args.llm_eval:
@@ -905,6 +1141,114 @@ def main():
         print(f"\nLLM evaluation mode complete!")
         print(f"Failed task IDs saved to: data/datasets/{args.output}")
         return
+
+    elif args.playbook_cluster:
+        # Playbook clustering mode
+        playbook_dir = Path(args.playbook_dir)
+        stats_file = playbook_dir / "run_once_stats.txt"
+
+        if not playbook_dir.exists():
+            parser.error(f"Playbook directory not found: {playbook_dir}")
+        if not stats_file.exists():
+            parser.error(f"Stats file not found: {stats_file}")
+
+        # Parse cluster argument
+        if ':' in args.playbook_cluster:
+            parts = args.playbook_cluster.split(':', 1)
+            similarity_metric = parts[0]
+            try:
+                threshold = float(parts[1])
+            except ValueError:
+                parser.error(f"Invalid threshold in --playbook-cluster argument: {parts[1]}")
+        else:
+            # For oracle, threshold is not needed
+            similarity_metric = args.playbook_cluster
+            threshold = 0.0  # Will be ignored for oracle
+
+        # Validate similarity metric
+        valid_metrics = ["cosine", "oracle", "embedding"]
+        if similarity_metric not in valid_metrics:
+            parser.error(f"Invalid similarity metric: {similarity_metric}. Must be one of {valid_metrics}")
+
+        print(f"\n=== PLAYBOOK-BASED CLUSTERING ===")
+        print(f"Playbook directory: {playbook_dir}")
+        print(f"Similarity metric: {similarity_metric}")
+        if similarity_metric != "oracle":
+            print(f"Threshold: {threshold}")
+        print(f"Examples per cluster: {args.examples_per_cluster}")
+        if args.difficulty:
+            print(f"Difficulty filter: {args.difficulty}")
+            if args.difficulty == "custom" and args.ratio:
+                print(f"Custom ratio: {args.ratio}")
+            elif args.difficulty == "balanced":
+                print(f"Using balanced distribution (1:1:1)")
+        else:
+            print(f"Difficulty filter: None (all difficulties)")
+
+        # Cluster tasks by playbook similarity
+        clusters = cluster_tasks_by_playbook_similarity(
+            playbook_dir,
+            stats_file,
+            similarity_metric,
+            threshold,
+            embedding_model=args.embedding_model
+        )
+
+        print(f"\nPlaybook clustering complete: {len(clusters)} clusters found")
+
+        # Print cluster statistics
+        if clusters:
+            cluster_sizes = [len(cluster) for cluster in clusters]
+            print(f"Cluster size range: {min(cluster_sizes)} to {max(cluster_sizes)}")
+            print(f"Average cluster size: {sum(cluster_sizes) / len(cluster_sizes):.1f}")
+
+            # Select from clusters with difficulty filtering
+            filter_msg = f"with difficulty filter '{args.difficulty}'" if args.difficulty else "without difficulty filter"
+            print(f"\nSelecting {args.examples_per_cluster} example(s) from each cluster {filter_msg}...")
+            try:
+                selected_tasks, difficulty_stats = select_from_clusters(
+                    clusters,
+                    args.examples_per_cluster,
+                    difficulty_filter=args.difficulty,
+                    ratio=args.ratio
+                )
+                print(f"Selected {len(selected_tasks)} tasks total")
+
+                # Print difficulty stats if they exist
+                if difficulty_stats.get('exact_matches', 0) > 0:
+                    print(f"Exact difficulty matches: {difficulty_stats['exact_matches']}")
+                if difficulty_stats.get('approximate_matches'):
+                    print("Approximate matches (requested → actual):")
+                    for (req, actual), count in difficulty_stats['approximate_matches'].items():
+                        print(f"  Difficulty {req} → {actual}: {count} tasks")
+
+                # Extract task IDs in selected order
+                selected_task_ids = [task['task_id'] for task in selected_tasks]
+
+                # Apply ordering if specified
+                if args.order != "original":
+                    # Convert to (task_id, difficulty) pairs for ordering
+                    task_pairs = [(task['task_id'], task['difficulty']) for task in selected_tasks]
+                    ordered_pairs = order_tasks(task_pairs, args.order, args.seed)
+                    selected_task_ids = [task_id for task_id, _ in ordered_pairs]
+                    print(f"Applied ordering: {args.order}")
+
+                # Print summary
+                print_summary([(task['task_id'], task['difficulty']) for task in selected_tasks])
+
+                # Save selected task IDs
+                save_dataset(selected_task_ids, args.output)
+                print(f"\nPlaybook clustering mode complete!")
+                print(f"Selected task IDs saved to: data/datasets/{args.output}")
+                return
+
+            except ValueError as e:
+                print(f"\nError during selection: {e}")
+                print("Consider using a -preferred mode instead of -only mode for more flexibility")
+                return
+        else:
+            print("No clusters found. Check playbook directory and stats file.")
+            return
 
     elif args.cluster:
         # Parse cluster argument
