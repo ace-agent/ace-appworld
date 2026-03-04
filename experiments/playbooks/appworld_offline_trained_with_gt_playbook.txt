@@ -3,27 +3,32 @@
 [shr-00005] Always look at API specifications (using apis.api_docs.show_api_doc) before calling an API.
 [shr-00006] Write small chunks of code and only one chunk of code in every step. Make sure everything is working correctly before making any irreversible change.
 
-[shr-00009] When aggregating data from multiple sources (e.g., library, albums, playlists), always create a unique set based on meaningful identifiers (title + artists) to avoid duplicates in the final output.
 ## APIs TO USE FOR SPECIFIC INFORMATION
 [api-00004] You can use the "supervisor" app to get information about my accounts and use the "phone" app to get information about friends and family.
 
+[api-00011] File system API responses: create_file() returns {"message": "string", "file_path": "string"} on success. Always check the response to confirm file creation before proceeding with subsequent operations.
 ## USEFUL CODE SNIPPETS AND TEMPLATES
 
-[code-00012] For CSV file creation with proper formatting: escape quotes by replacing '"' with '""' and wrap fields in quotes to handle special characters and commas in data values.
+[code-00010] For CSV file creation without external modules:
+# Create CSV content manually with proper escaping
+csv_lines = ['Header1,Header2']
+for item in data:
+    field1 = item['field1'].replace('"', '""')
+    field2 = item['field2'].replace('"', '""')
+    csv_lines.append(f'"{field1}","{field2}"')
+csv_content = '\n'.join(csv_lines)
 ## COMMON MISTAKES AND CORRECT STRATEGIES
 
-[cms-00010] Always verify actual API response structures through testing, not just documentation. In the Spotify album API, the response contains 'songs' (array of song objects) not 'song_ids' as might be inferred from other APIs.
-[cms-00017] When creating CSV files for system validation, avoid assuming field quoting requirements. Test systems may expect unquoted fields even when data contains special characters. Always verify the exact CSV format expected by the validation system before implementation.
 ## PROBLEM-SOLVING HEURISTICS AND WORKFLOWS
 [psw-00002] Remember you can use the variables in your code in subsequent code blocks.
 [psw-00007] Many APIs return items in "pages". Make sure to run through all the pages by looping over `page_index`.
 
 ## VERIFICATION CHECKLIST
 
-[vc-00011] Before performing irreversible actions like account deletion, verify that: (1) all required data has been successfully backed up, (2) the backup file has been created and validated, (3) the operation is the final step in the task sequence.
-[vc-00016] Before creating CSV files, verify the expected format requirements: (1) check if fields should be quoted or unquoted, (2) confirm the exact delimiter and separator requirements, (3) validate against test expectations for field formatting to ensure compatibility with validation systems.
+[vc-00012] After file creation, verify the operation was successful by checking the response message and file_path before proceeding with any irreversible operations like account termination.
 ## TROUBLESHOOTING AND PITFALLS:
 
+[ts-00009] When creating CSV files, the file_system app may not allow certain Python modules like 'io'. Always build CSV content manually using string concatenation and proper CSV escaping (e.g., wrapping fields in quotes and escaping internal quotes with double quotes).
 ## OTHERS
 [misc-00003] Remember that the email addresses, access tokens and variables (e.g. spotify_password) in the example above are not valid anymore.
 [misc-00008] Once you have completed the task, make sure to call apis.supervisor.complete_task(). If the task asked for some information, return it as the answer argument, i.e. call apis.supervisor.complete_task(answer=<answer>). Many tasks do not require an answer, so in those cases, just call apis.supervisor.complete_task() i.e. do not pass any argument.

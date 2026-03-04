@@ -366,15 +366,20 @@ class SimplifiedReActStarAgent(StarAgent):
          
         # add full conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
-        for i, msg in enumerate(self.trimmed_messages):
+        trimmed_messages = self.trimmed_messages[:41]
+        last_message = trimmed_messages[-1]['content']
+        last_message = last_message[:last_message.index("USER")]
+        trimmed_messages[-1]['content'] = last_message
+        for i, msg in enumerate(trimmed_messages):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
             conversation_history += f"[{i}] {role.upper()}: {content}\n\n"
-        
+        breakpoint()
         filled_prompt += conversation_history
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
-        reasoning_text = messages[0].get("content", "")
+        reasoning_text = messages[0].get("content", "") # needs to be fixed 
+        breakpoint()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
