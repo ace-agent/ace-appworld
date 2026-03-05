@@ -366,10 +366,12 @@ class SimplifiedReActStarAgent(StarAgent):
          
         # add full conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
-        trimmed_messages = self.trimmed_messages[:41]
+        trimmed_messages = self.trimmed_messages[:19]
+        post_messages = self.trimmed_messages[self.num_instruction_messages - 1 :]
         last_message = trimmed_messages[-1]['content']
         last_message = last_message[:last_message.index("USER")]
         trimmed_messages[-1]['content'] = last_message
+        trimmed_messages = trimmed_messages + post_messages
         for i, msg in enumerate(trimmed_messages):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
@@ -377,7 +379,9 @@ class SimplifiedReActStarAgent(StarAgent):
         filled_prompt += conversation_history
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
-        reasoning_text = messages[0].get("content", "") # needs to be fixed 
+        match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
+        reasoning_text = match.group(1) if match else None
+        breakpoint()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
@@ -390,7 +394,9 @@ class SimplifiedReActStarAgent(StarAgent):
         Let the curator update the playbook based on the full conversation history, i.e. all messages and reflections.
         """
         
-        if self.use_reflector and reasoning_text != None:
+        if self.use_reflector:
+            breakpoint()
+            print("curator call")
             _, reasoning_text = self.reflector_call()
 
         # Current playbook and question context

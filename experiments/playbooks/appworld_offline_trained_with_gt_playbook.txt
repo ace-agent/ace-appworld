@@ -3,30 +3,13 @@
 [shr-00005] Always look at API specifications (using apis.api_docs.show_api_doc) before calling an API.
 [shr-00006] Write small chunks of code and only one chunk of code in every step. Make sure everything is working correctly before making any irreversible change.
 
+[shr-00010] When working with APIs that return nested data structures (like artists arrays), carefully examine the response schema to understand how to extract and format the required information, such as joining artist names with specific separators
 ## APIs TO USE FOR SPECIFIC INFORMATION
 [api-00004] You can use the "supervisor" app to get information about my accounts and use the "phone" app to get information about friends and family.
 
-[api-00011] File system API responses: create_file() returns {"message": "string", "file_path": "string"} on success. Always check the response to confirm file creation before proceeding with subsequent operations.
-[api-00015] Spotify API pagination: The show_song_library, show_album_library, and show_playlist_library APIs all use pagination with page_index parameter. Always use while True loop to iterate through all pages until empty result is returned.
-[api-00016] File system API parameters: create_directory() requires 'directory_path' parameter, not 'file_path'. Always check API documentation for exact parameter names before calling.
 ## USEFUL CODE SNIPPETS AND TEMPLATES
 
-[code-00010] For CSV file creation without external modules:
-# Create CSV content manually with proper escaping
-csv_lines = ['Header1,Header2']
-for item in data:
-    field1 = item['field1'].replace('"', '""')
-    field2 = item['field2'].replace('"', '""')
-    csv_lines.append(f'"{field1}","{field2}"')
-csv_content = '\n'.join(csv_lines)
-[code-00017] For combining and deduplicating songs from multiple Spotify sources:
-# Collect songs from library, albums, and playlists, then deduplicate by song_id
-all_sources = song_library_songs + album_songs + playlist_songs
-unique_songs = {}
-for song in all_sources:
-    song_id = song['song_id']
-    if song_id not in unique_songs:
-        unique_songs[song_id] = song
+[code-00009] When creating CSV files manually without external modules: build CSV lines as strings with proper quoting. Example: csv_lines = ['Header1,Header2']; for item in data: csv_lines.append(f'"{value1}","{value2}"'); csv_content = '\n'.join(csv_lines)
 ## COMMON MISTAKES AND CORRECT STRATEGIES
 
 ## PROBLEM-SOLVING HEURISTICS AND WORKFLOWS
@@ -35,12 +18,8 @@ for song in all_sources:
 
 ## VERIFICATION CHECKLIST
 
-[vc-00012] After file creation, verify the operation was successful by checking the response message and file_path before proceeding with any irreversible operations like account termination.
-[vc-00019] Before account termination, verify that all required data has been successfully exported and saved to the backup file by checking the file creation response and ensuring the file contains the expected number of records.
 ## TROUBLESHOOTING AND PITFALLS:
 
-[ts-00009] When creating CSV files, the file_system app may not allow certain Python modules like 'io'. Always build CSV content manually using string concatenation and proper CSV escaping (e.g., wrapping fields in quotes and escaping internal quotes with double quotes).
-[ts-00018] When creating CSV content with f-strings and quotes, be careful with nested quotes to avoid syntax errors. Use string concatenation instead: title = '"' + title.replace('"', '""') + '"' instead of f'"{title.replace('"', '""')}"'
 ## OTHERS
 [misc-00003] Remember that the email addresses, access tokens and variables (e.g. spotify_password) in the example above are not valid anymore.
 [misc-00008] Once you have completed the task, make sure to call apis.supervisor.complete_task(). If the task asked for some information, return it as the answer argument, i.e. call apis.supervisor.complete_task(answer=<answer>). Many tasks do not require an answer, so in those cases, just call apis.supervisor.complete_task() i.e. do not pass any argument.

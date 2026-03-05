@@ -83,7 +83,9 @@ class HFPolicy:
         #inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         
         inputs = self.tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True,  return_tensors="pt")
-        
+        device = next(self.model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
         #stop_str = "</json>"
         #stop_ids = self.tokenizer.encode(stop_str, add_special_tokens=False)
         #stopping = StoppingCriteriaList([StopOnSubsequence(stop_ids)])
