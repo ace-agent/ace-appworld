@@ -374,12 +374,10 @@ class SimplifiedReActStarAgent(StarAgent):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
             conversation_history += f"[{i}] {role.upper()}: {content}\n\n"
-        breakpoint()
         filled_prompt += conversation_history
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
         reasoning_text = messages[0].get("content", "") # needs to be fixed 
-        breakpoint()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
