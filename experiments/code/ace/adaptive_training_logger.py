@@ -216,6 +216,11 @@ class AdaptiveTrainingLogger:
         # Analyze rules and track contributions
         self._analyze_playbook_rules(playbook_text, iteration)
 
+        # Track which tasks contributed to rules (only if this is not the initial playbook)
+        if iteration > 0:
+            for task_id in self.current_iteration_tasks:
+                self._track_task_contribution(task_id, iteration)
+
         # Log metadata
         version_metadata = {
             "version": self.playbook_version,
@@ -466,10 +471,6 @@ class AdaptiveTrainingLogger:
 
                 # Update the rollout file to mark it has reflection
                 self._update_rollout_reflection_status(iteration, rollout)
-
-                # Track task contribution to rules
-                # (Will be updated when playbook changes)
-                self._track_task_contribution(rollout.task_id, iteration)
 
         # Save reflections for this iteration
         if reflections_data:

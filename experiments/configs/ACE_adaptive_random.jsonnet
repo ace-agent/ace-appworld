@@ -88,7 +88,7 @@ local curator_model_config = {
             "generator_prompt_file_path": experiment_prompts_path + "/appworld_react_generator_prompt.txt",
             "reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_with_gt_prompt.txt",
             "curator_prompt_file_path": experiment_prompts_path + "/appworld_react_curator_prompt.txt",
-            "initial_playbook_file_path": experiment_playbooks_path + "/appworld_initial_playbook.txt",
+            "initial_playbook_file_path": experiment_playbooks_path + "/appworld_empty_playbook.txt",
             "trained_playbook_file_path": experiment_playbooks_path + "/appworld_adaptive_trained_random.txt",
             "ignore_multiple_calls": true,
             "max_steps": 40,

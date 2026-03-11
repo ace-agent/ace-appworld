@@ -482,8 +482,14 @@ class AdaptiveTrainingLoop:
                         return reflection
                     self.agent.reflector_call = mock_reflector_call
 
-                    # Call curator (it will use mock reflector)
-                    self.agent.curator_call()
+                    # Disable file logging during curator call to avoid I/O errors on closed files
+                    original_file_console = self.agent.logger.file_console
+                    try:
+                        self.agent.logger.file_console = None
+                        # Call curator (it will use mock reflector)
+                        self.agent.curator_call()
+                    finally:
+                        self.agent.logger.file_console = original_file_console
 
                     # Restore reflector
                     self.agent.reflector_call = original_reflector_call
