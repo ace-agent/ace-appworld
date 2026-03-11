@@ -30,6 +30,8 @@ class RolloutInfo:
 class BasePruner(ABC):
     """Base class for rollout pruning strategies"""
 
+    strategy: str = "base"  # Subclasses should override this
+
     def __init__(self, num_rollouts_for_reflection: int):
         """
         Args:
@@ -59,6 +61,8 @@ class RandomPruner(BasePruner):
     Randomly selects K rollouts from N.
     """
 
+    strategy = "random"
+
     def __init__(self, num_rollouts_for_reflection: int, random_seed: Optional[int] = None):
         super().__init__(num_rollouts_for_reflection)
         self.random_seed = random_seed
@@ -79,6 +83,8 @@ class FailureFirstPruner(BasePruner):
 
     Rationale: Learning from failures is more valuable than successes.
     """
+
+    strategy = "failure_first"
 
     def prune(self, rollouts: List[RolloutInfo]) -> List[RolloutInfo]:
         """Select failed tasks first, then fill with successes if needed"""
@@ -111,6 +117,8 @@ class HighCostPruner(BasePruner):
     and may provide more valuable learning signals.
     """
 
+    strategy = "high_cost"
+
     def prune(self, rollouts: List[RolloutInfo]) -> List[RolloutInfo]:
         """Select tasks with highest cost"""
         if len(rollouts) <= self.num_rollouts_for_reflection:
@@ -130,6 +138,8 @@ class DiversePruner(BasePruner):
     - Some failures, some successes
     - Mix of high and low cost
     """
+
+    strategy = "diverse"
 
     def prune(self, rollouts: List[RolloutInfo]) -> List[RolloutInfo]:
         """Select diverse rollouts"""
@@ -183,6 +193,8 @@ class MostInformativePruner(BasePruner):
     - High-cost successes - complex tasks
     - Other successes
     """
+
+    strategy = "most_informative"
 
     def prune(self, rollouts: List[RolloutInfo]) -> List[RolloutInfo]:
         """Select most informative rollouts"""

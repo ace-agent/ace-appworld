@@ -188,8 +188,7 @@ def main():
     print(f"\nLogging: {'enabled' if enable_logging else 'disabled'}")
     if enable_logging:
         print(f"Experiment directory: {log_base_dir}/<experiment_name>_<timestamp>/")
-        print(f"  - playbooks/           (playbook versions from logger)")
-        print(f"  - playbook_snapshots/  (iteration snapshots)")
+        print(f"  - playbooks/           (playbook versions at each iteration)")
         print(f"  - iterations/          (iteration summaries)")
         print(f"  - rollouts/            (rollout details)")
         print(f"  - reflections/         (reflections)")

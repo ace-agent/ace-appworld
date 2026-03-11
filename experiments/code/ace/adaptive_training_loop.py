@@ -81,13 +81,27 @@ class AdaptiveTrainingLoop:
         # Initialize logger
         self.enable_logging = enable_logging
         if self.enable_logging:
+            # Build config dict for logging
+            config_dict = {
+                "num_rollouts_per_task": num_rollouts_per_task,
+                "selector": {
+                    "algorithm": selector.algorithm if hasattr(selector, 'algorithm') else "unknown",
+                    "num_tasks_per_iteration": selector.num_tasks_per_iteration if hasattr(selector, 'num_tasks_per_iteration') else None,
+                    "no_repeat_tasks": selector.no_repeat_tasks if hasattr(selector, 'no_repeat_tasks') else None,
+                    "dataset": selector.dataset_path if hasattr(selector, 'dataset_path') else None,
+                },
+                "pruner": {
+                    "strategy": pruner.strategy if pruner else None,
+                    "num_rollouts_for_reflection": pruner.num_rollouts_for_reflection if pruner else None,
+                } if pruner else None,
+            }
+
             self.logger = AdaptiveTrainingLogger(
                 experiment_name=self.experiment_name,
                 log_base_dir=log_base_dir,
                 create_timestamp=True,
+                config=config_dict,
             )
-            # Use logger's directory for playbook snapshots
-            self.playbook_save_dir = str(self.logger.log_dir / "playbook_snapshots")
             # Log initial playbook
             if hasattr(self.agent, 'playbook') and self.agent.playbook:
                 self.logger.log_playbook(
@@ -97,12 +111,11 @@ class AdaptiveTrainingLoop:
                 )
         else:
             self.logger = None
-            # Fall back to provided dir or default
+            # Fall back to provided dir or default if no logger
             self.playbook_save_dir = playbook_save_dir or "experiments/playbooks"
-
-        # Create save directory if needed
-        if self.save_playbook_every_iteration:
-            Path(self.playbook_save_dir).mkdir(parents=True, exist_ok=True)
+            # Create save directory if needed
+            if self.save_playbook_every_iteration:
+                Path(self.playbook_save_dir).mkdir(parents=True, exist_ok=True)
 
     def train(
         self,
@@ -180,7 +193,7 @@ class AdaptiveTrainingLoop:
 
             # Log iteration completion
             if self.logger:
-                pruning_strategy = self.pruner.strategy if self.pruner and hasattr(self.pruner, 'strategy') else None
+                pruning_strategy = self.pruner.strategy if self.pruner else None
                 self.logger.log_iteration_complete(
                     iteration=self.iteration_count,
                     selected_tasks=iteration_result.task_ids,
@@ -203,14 +216,14 @@ class AdaptiveTrainingLoop:
                 playbook_text=self.agent.playbook,
             )
 
-            # Save playbook snapshot
-            if self.save_playbook_every_iteration:
+            # Save playbook snapshot (only if logger is disabled, otherwise logger already saved it)
+            if self.save_playbook_every_iteration and not self.logger:
                 self._save_playbook_snapshot()
 
             # Show progress
             progress = self.selector.get_progress()
-            print(f"\nProgress: {progress['tried_tasks']}/{progress['total_tasks']} tasks "
-                  f"({progress['progress_percent']:.1f}%) - Iteration {self.iteration_count} complete\n")
+            print(f"\nProgress: {progress['tried_tasks']}/{progress['total_tasks']} tasks - "
+                  f"Iteration {self.iteration_count} complete\n")
 
         print(f"\nTraining complete! Processed {self.iteration_count} iterations")
         self._save_final_playbook()
@@ -282,6 +295,9 @@ class AdaptiveTrainingLoop:
                     pass  # Silent - no need to print for every rollout
                 self.agent.curator_call = mock_curator_call
 
+                # Save execution context for later reflection generation
+                execution_context = {}
+
                 try:
                     # Solve task (generator + execution only)
                     self.agent.solve_task(task_id, self.experiment_name)
@@ -292,10 +308,20 @@ class AdaptiveTrainingLoop:
                     rollout_info["success"] = len(test_tracker.failures) == 0
                     rollout_info["test_failures"] = len(test_tracker.failures)
 
+                    # Capture execution context for reflection
+                    execution_context = {
+                        "test_report": getattr(self.agent, 'test_report', None),
+                        "world_gt_code": getattr(self.agent, 'world_gt_code', None),
+                        "trimmed_messages": list(getattr(self.agent, 'trimmed_messages', [])),
+                        "step_number": getattr(self.agent, 'step_number', 0),
+                    }
+
                 except Exception as e:
                     print(f"  Error generating rollout: {e}")
                     rollout_info["success"] = False
-                    rollout_info["test_failures"] = 999  # Large number to indicate error
+                    # test_failures=999 is a sentinel value indicating an exception occurred
+                    # during rollout generation (not an actual test failure count)
+                    rollout_info["test_failures"] = 999
 
                 finally:
                     # Restore original settings
@@ -318,6 +344,7 @@ class AdaptiveTrainingLoop:
                         "task_index": task_index,
                         "rollout_index": rollout_index,
                         "rollout_number": rollout_counter,
+                        "execution_context": execution_context,  # Store for later reflection
                     }
                 )
 
@@ -362,34 +389,64 @@ class AdaptiveTrainingLoop:
                   f"(success={rollout.success}, test_failures={rollout.test_failures})")
 
             try:
-                # We need to call reflector for this rollout
-                # The reflector needs access to the agent's trajectory for this task
-                # For now, we'll need to load/restore the trajectory context for this task
+                # Restore execution context from rollout metadata
+                execution_context = rollout.metadata.get("execution_context", {})
 
-                # TODO: This is a simplified approach - in practice, you may need to
-                # restore more context (trajectory, generated code, etc.) for the reflector
+                if execution_context and self.agent.use_reflector:
+                    # Temporarily restore agent state for reflection
+                    original_test_report = self.agent.test_report
+                    original_world_gt_code = self.agent.world_gt_code
+                    original_trimmed_messages = self.agent.trimmed_messages
+                    original_step_number = self.agent.step_number
 
-                # Call reflector to generate reflection
-                if self.agent.use_reflector:
-                    # Set the task context for reflector
-                    # Note: This assumes reflector can work with the rollout info
-                    # You may need to modify this based on your reflector implementation
-                    reflection = self.agent.reflector_call()
+                    try:
+                        # Restore context
+                        self.agent.test_report = execution_context.get("test_report")
+                        self.agent.world_gt_code = execution_context.get("world_gt_code")
+                        self.agent.trimmed_messages = execution_context.get("trimmed_messages", [])
+                        self.agent.step_number = execution_context.get("step_number", 0)
 
-                    if reflection:
-                        reflections.append(reflection)
-                        # Store reflection in rollout object for logging
-                        rollout.reflection = reflection
-                        print(f"    Reflection generated (length: {len(reflection)})")
-                    else:
-                        print(f"    No reflection generated")
+                        # Call reflector with restored context
+                        reflection = self.agent.reflector_call()
+
+                        if reflection:
+                            reflections.append(reflection)
+                            rollout.reflection = reflection
+                            print(f"    Generated reflection from reflector (length: {len(reflection)} chars)")
+                        else:
+                            # Fallback to simple reflection
+                            reflection = f"Task {rollout.task_id} - No reflection generated by reflector."
+                            reflections.append(reflection)
+                            rollout.reflection = reflection
+                            print(f"    Reflector returned empty, using fallback")
+
+                    finally:
+                        # Restore original agent state
+                        self.agent.test_report = original_test_report
+                        self.agent.world_gt_code = original_world_gt_code
+                        self.agent.trimmed_messages = original_trimmed_messages
+                        self.agent.step_number = original_step_number
                 else:
-                    print(f"    Reflector disabled - skipping")
+                    # Fallback: Simple text-based reflection when no context or reflector disabled
+                    if rollout.success and rollout.test_failures == 0:
+                        reflection = f"Task {rollout.task_id} completed successfully."
+                    elif rollout.test_failures == 999:
+                        reflection = f"Task {rollout.task_id} encountered an error during execution."
+                    else:
+                        reflection = f"Task {rollout.task_id} failed with {rollout.test_failures} test failures."
+
+                    reflections.append(reflection)
+                    rollout.reflection = reflection
+                    print(f"    Simple fallback reflection: {reflection}")
 
             except Exception as e:
                 print(f"    Error generating reflection: {e}")
                 import traceback
                 traceback.print_exc()
+                # Use fallback on error
+                reflection = f"Task {rollout.task_id} - Error during reflection generation."
+                reflections.append(reflection)
+                rollout.reflection = reflection
 
         print(f"\nGenerated {len(reflections)} reflections from {len(rollouts)} rollouts")
 

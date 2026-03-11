@@ -735,8 +735,6 @@ class AdaptiveQuestionSelector:
             "total_tasks": len(self.all_tasks),
             "tried_tasks": len(self.tried_tasks),
             "remaining_tasks": len(self.all_tasks) - len(self.tried_tasks),
-            "batches_completed": len(self.batch_history),
-            "progress_percent": len(self.tried_tasks) / len(self.all_tasks) * 100,
         }
 
     def reset(self):
