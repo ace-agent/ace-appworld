@@ -1,9 +1,9 @@
-// Adaptive Training Configuration: Random Selection (Baseline)
+// Adaptive Training Configuration: Uncertainty-Based Selection
 //
-// This config uses the AdaptiveQuestionSelector with random selection (no repeat):
-// - Randomly selects tasks without replacement
-// - Batch size of 5 tasks per iteration
-// - Serves as baseline for comparison with smarter selection algorithms
+// This config uses the AdaptiveQuestionSelector with uncertainty-based selection:
+// - Analyzes current playbook to identify areas of low confidence
+// - Selects tasks where playbook has limited coverage or low confidence
+// - Aims to maximize learning efficiency by focusing on uncertain areas
 
 local project_home_path = std.extVar("APPWORLD_PROJECT_PATH");
 local experiment_prompts_path = project_home_path + "/experiments/prompts";
@@ -12,10 +12,8 @@ local experiment_configs_path = project_home_path + "/experiments/configs";
 local experiment_code_path = project_home_path + "/experiments/code";
 
 local generator_model_config = {
-    // "name": "DeepSeek-V3.1",
-    // "provider": "sambanova",
-    "name": "deepseek-ai/DeepSeek-V3.1",
-    "provider": "together",
+    "name": "DeepSeek-V3.1",
+    "provider": "sambanova",
     "temperature": 0,
     "seed": 100,
     "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],
@@ -85,7 +83,7 @@ local curator_model_config = {
             "reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_with_gt_prompt.txt",
             "curator_prompt_file_path": experiment_prompts_path + "/appworld_react_curator_prompt.txt",
             "initial_playbook_file_path": experiment_playbooks_path + "/appworld_initial_playbook.txt",
-            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_adaptive_trained_random.txt",
+            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_adaptive_trained_uncertainty.txt",
             "ignore_multiple_calls": true,
             "max_steps": 40,
             "max_cost_overall": 1000,
@@ -95,10 +93,14 @@ local curator_model_config = {
         },
 
         "selector": {
-            "algorithm": "random",
+            "algorithm": "uncertainty_based",
             "num_tasks_per_iteration": 5,
             "dataset_path": project_home_path + "/experiments/data/train.txt",
             "random_seed": 42,
+
+            // Algorithm-specific parameters
+            "selection_strategy": "low_confidence",  // Options: "low_confidence", "high_variance", "least_covered"
+            // "difficulty_filter": "medium",          // Optional: only select from specific difficulty
         },
 
         "max_iterations": null,

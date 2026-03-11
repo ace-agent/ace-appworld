@@ -119,5 +119,9 @@ local curator_model_config = {
         "max_iterations": null,                            // null = train on all tasks
         "save_playbook_every_iteration": true,             // Save intermediate playbooks
         "playbook_save_dir": experiment_playbooks_path + "/adaptive_snapshots",
+
+        // Logging configuration
+        "enable_logging": true,                            // Enable comprehensive experiment logging
+        "log_base_dir": "experiments/logs",                // Base directory for experiment logs
     }
 }

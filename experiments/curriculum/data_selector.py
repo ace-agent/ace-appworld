@@ -48,8 +48,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 
 def load_dataset(dataset_name: str) -> List[str]:
-    """Load task IDs from dataset file."""
-    dataset_file = Path("data/datasets") / dataset_name
+    """Load task IDs from dataset file.
+
+    Args:
+        dataset_name: Either a full path or just a filename (will be looked up in data/datasets/)
+    """
+    dataset_path = Path(dataset_name)
+
+    # If it's a relative filename (not a full path), prepend data/datasets/
+    if not dataset_path.is_absolute() and not str(dataset_path).startswith("data/"):
+        dataset_file = Path("data/datasets") / dataset_name
+    else:
+        dataset_file = dataset_path
 
     if not dataset_file.exists():
         raise FileNotFoundError(f"Dataset file not found: {dataset_file}")

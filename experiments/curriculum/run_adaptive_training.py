@@ -18,6 +18,9 @@ Usage:
         --config experiments/configs/ACE_adaptive_random.jsonnet \
         --max-iterations 10 \
         --num-tasks-per-iteration 3 \
+        --num-rollouts-for-reflection 5 \
+        --pruning-strategy failure_first \
+        --dataset data/datasets/train.txt \
         --experiment-name my_experiment
 """
 
@@ -37,11 +40,15 @@ from appworld_experiments.code.ace.adaptive_training_loop import run_adaptive_tr
 
 def load_config(config_path: str) -> dict:
     """Load and parse Jsonnet config file"""
-    # Set environment variable for APPWORLD_PROJECT_PATH
-    os.environ['APPWORLD_PROJECT_PATH'] = str(project_path)
+    # Get project path - try environment variable first, then use current path
+    appworld_project_path = os.environ.get('APPWORLD_PROJECT_PATH', str(project_path))
 
-    # Parse jsonnet
-    config_str = _jsonnet.evaluate_file(config_path)
+    # Parse jsonnet with external variables
+    ext_vars = {
+        'APPWORLD_PROJECT_PATH': appworld_project_path,
+        'PROJECT_HOME_PATH': appworld_project_path,  # Support both variable names
+    }
+    config_str = _jsonnet.evaluate_file(config_path, ext_vars=ext_vars)
     config = json.loads(config_str)
 
     return config
@@ -80,6 +87,25 @@ def main():
         default=None,
         help='Selection algorithm (overrides config)',
     )
+    parser.add_argument(
+        '--num-rollouts-for-reflection',
+        type=int,
+        default=None,
+        help='Number of rollouts to keep after pruning (k parameter, overrides config)',
+    )
+    parser.add_argument(
+        '--pruning-strategy',
+        type=str,
+        choices=['random', 'failure_first', 'high_cost', 'diverse', 'most_informative'],
+        default=None,
+        help='Pruning strategy to use (overrides config)',
+    )
+    parser.add_argument(
+        '--dataset',
+        type=str,
+        default=None,
+        help='Path to dataset file (overrides config)',
+    )
 
     args = parser.parse_args()
 
@@ -117,9 +143,30 @@ def main():
     if args.algorithm is not None:
         selector_config['algorithm'] = args.algorithm
 
+    if args.dataset is not None:
+        selector_config['dataset_path'] = args.dataset
+
+    if args.num_rollouts_for_reflection is not None:
+        if pruner_config is None:
+            pruner_config = {}
+        pruner_config['num_rollouts_for_reflection'] = args.num_rollouts_for_reflection
+
+    if args.pruning_strategy is not None:
+        if pruner_config is None:
+            pruner_config = {}
+        pruner_config['strategy'] = args.pruning_strategy
+
+    # Ensure pruner has a strategy if num_rollouts_for_reflection is set
+    if pruner_config is not None and 'num_rollouts_for_reflection' in pruner_config:
+        if 'strategy' not in pruner_config:
+            pruner_config['strategy'] = 'random'  # Default to random pruning
+            print(f"Warning: num_rollouts_for_reflection set without strategy, defaulting to 'random'")
+
     num_rollouts_per_task = config['config'].get('num_rollouts_per_task', 1)
     save_playbook_every_iteration = config['config'].get('save_playbook_every_iteration', True)
     playbook_save_dir = config['config'].get('playbook_save_dir')
+    enable_logging = config['config'].get('enable_logging', True)
+    log_base_dir = config['config'].get('log_base_dir', 'experiments/logs')
 
     # Print configuration summary
     print("\n" + "="*80)
@@ -138,7 +185,17 @@ def main():
         print(f"\nPruning: disabled (all rollouts sent to reflector)")
     print(f"\nExperiment name: {experiment_name or 'default'}")
     print(f"Save playbook every iteration: {save_playbook_every_iteration}")
-    if playbook_save_dir:
+    print(f"\nLogging: {'enabled' if enable_logging else 'disabled'}")
+    if enable_logging:
+        print(f"Experiment directory: {log_base_dir}/<experiment_name>_<timestamp>/")
+        print(f"  - playbooks/           (playbook versions from logger)")
+        print(f"  - playbook_snapshots/  (iteration snapshots)")
+        print(f"  - iterations/          (iteration summaries)")
+        print(f"  - rollouts/            (rollout details)")
+        print(f"  - reflections/         (reflections)")
+        print(f"  - playbook_analysis/   (rule contributions)")
+        print(f"  - summary.json         (final summary)")
+    elif playbook_save_dir:
         print(f"Playbook save directory: {playbook_save_dir}")
     print("="*80 + "\n")
 
@@ -153,6 +210,8 @@ def main():
             max_iterations=max_iterations,
             save_playbook_every_iteration=save_playbook_every_iteration,
             playbook_save_dir=playbook_save_dir,
+            enable_logging=enable_logging,
+            log_base_dir=log_base_dir,
         )
 
         print("\n" + "="*80)

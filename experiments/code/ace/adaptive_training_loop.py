@@ -29,6 +29,7 @@ from appworld.common.constants import DEFAULT_EXPERIMENT_NAME
 from appworld.evaluator import evaluate_task
 from appworld_experiments.code.ace.adaptation_agent import StarAgent
 from appworld_experiments.code.ace.rollout_pruner import BasePruner, RolloutInfo, create_pruner
+from appworld_experiments.code.ace.adaptive_training_logger import AdaptiveTrainingLogger
 from experiments.curriculum.adaptive_selector import AdaptiveQuestionSelector, create_selector
 
 
@@ -54,6 +55,8 @@ class AdaptiveTrainingLoop:
         experiment_name: Optional[str] = None,
         save_playbook_every_iteration: bool = True,
         playbook_save_dir: Optional[str] = None,
+        enable_logging: bool = True,
+        log_base_dir: str = "experiments/logs",
     ):
         """
         Args:
@@ -64,6 +67,8 @@ class AdaptiveTrainingLoop:
             experiment_name: Name for AppWorld experiment
             save_playbook_every_iteration: Whether to save playbook after each iteration
             playbook_save_dir: Directory to save intermediate playbooks
+            enable_logging: Whether to enable comprehensive logging
+            log_base_dir: Base directory for logs
         """
         self.agent = agent
         self.selector = selector
@@ -71,8 +76,29 @@ class AdaptiveTrainingLoop:
         self.num_rollouts_per_task = num_rollouts_per_task
         self.experiment_name = experiment_name or DEFAULT_EXPERIMENT_NAME
         self.save_playbook_every_iteration = save_playbook_every_iteration
-        self.playbook_save_dir = playbook_save_dir or "experiments/playbooks"
         self.iteration_count = 0
+
+        # Initialize logger
+        self.enable_logging = enable_logging
+        if self.enable_logging:
+            self.logger = AdaptiveTrainingLogger(
+                experiment_name=self.experiment_name,
+                log_base_dir=log_base_dir,
+                create_timestamp=True,
+            )
+            # Use logger's directory for playbook snapshots
+            self.playbook_save_dir = str(self.logger.log_dir / "playbook_snapshots")
+            # Log initial playbook
+            if hasattr(self.agent, 'playbook') and self.agent.playbook:
+                self.logger.log_playbook(
+                    self.agent.playbook,
+                    iteration=0,
+                    metadata={"type": "initial_playbook"},
+                )
+        else:
+            self.logger = None
+            # Fall back to provided dir or default
+            self.playbook_save_dir = playbook_save_dir or "experiments/playbooks"
 
         # Create save directory if needed
         if self.save_playbook_every_iteration:
@@ -115,6 +141,14 @@ class AdaptiveTrainingLoop:
             print(f"Tasks: {iteration_result.task_ids}")
             print(f"{'='*80}\n")
 
+            # Log iteration start
+            if self.logger:
+                self.logger.log_iteration_start(
+                    iteration=self.iteration_count,
+                    selected_tasks=iteration_result.task_ids,
+                    metadata=iteration_result.metadata,
+                )
+
             # Save starting playbook for this iteration
             starting_playbook = self.agent.playbook
 
@@ -144,6 +178,25 @@ class AdaptiveTrainingLoop:
             else:
                 print("\nNo rollouts to process - skipping curator")
 
+            # Log iteration completion
+            if self.logger:
+                pruning_strategy = self.pruner.strategy if self.pruner and hasattr(self.pruner, 'strategy') else None
+                self.logger.log_iteration_complete(
+                    iteration=self.iteration_count,
+                    selected_tasks=iteration_result.task_ids,
+                    all_rollouts=rollouts,
+                    pruned_rollouts=pruned_rollouts,
+                    pruning_strategy=pruning_strategy,
+                    metadata=iteration_result.metadata,
+                )
+
+                # Log playbook after update
+                self.logger.log_playbook(
+                    self.agent.playbook,
+                    iteration=self.iteration_count,
+                    metadata={"type": "after_iteration"},
+                )
+
             # Mark iteration complete
             self.selector.mark_batch_complete(
                 batch=iteration_result,
@@ -161,6 +214,11 @@ class AdaptiveTrainingLoop:
 
         print(f"\nTraining complete! Processed {self.iteration_count} iterations")
         self._save_final_playbook()
+
+        # Save final summary
+        if self.logger:
+            progress = self.selector.get_progress()
+            self.logger.save_summary(final_metadata=progress)
 
     def _generate_rollouts(
         self,
@@ -204,7 +262,7 @@ class AdaptiveTrainingLoop:
                 self.agent.playbook = starting_playbook
 
                 # Track cost before
-                initial_cost = self.agent.cost_tracker.get_total_cost()
+                initial_cost = self.agent.cost_tracker.overall_cost
 
                 self.agent.current_task_index = (
                     self.selector.get_progress()['tried_tasks'] + task_index
@@ -245,7 +303,7 @@ class AdaptiveTrainingLoop:
                     self.agent.curator_call = original_curator_call
 
                 # Calculate cost for this rollout
-                final_cost = self.agent.cost_tracker.get_total_cost()
+                final_cost = self.agent.cost_tracker.overall_cost
                 rollout_cost = final_cost - initial_cost
 
                 # Create rollout info (no reflection yet)
@@ -264,6 +322,15 @@ class AdaptiveTrainingLoop:
                 )
 
                 rollouts.append(rollout)
+
+                # Log rollout
+                if self.logger:
+                    self.logger.log_rollout(
+                        iteration=self.iteration_count,
+                        rollout=rollout,
+                        rollout_number=rollout_counter,
+                        trajectory=None,  # Could add trajectory logging here if needed
+                    )
 
                 print(f"  Rollout complete: success={rollout.success}, cost={rollout.cost:.2f}, "
                       f"steps={rollout.num_steps}, test_failures={rollout.test_failures}")
@@ -311,6 +378,8 @@ class AdaptiveTrainingLoop:
 
                     if reflection:
                         reflections.append(reflection)
+                        # Store reflection in rollout object for logging
+                        rollout.reflection = reflection
                         print(f"    Reflection generated (length: {len(reflection)})")
                     else:
                         print(f"    No reflection generated")
@@ -323,6 +392,13 @@ class AdaptiveTrainingLoop:
                 traceback.print_exc()
 
         print(f"\nGenerated {len(reflections)} reflections from {len(rollouts)} rollouts")
+
+        # Log reflections
+        if self.logger:
+            self.logger.log_reflections(
+                iteration=self.iteration_count,
+                rollouts_with_reflections=rollouts,
+            )
 
         # Step 2: Batch curator update with ALL reflections
         if reflections:
@@ -399,6 +475,8 @@ def run_adaptive_training(
     max_iterations: Optional[int] = None,
     save_playbook_every_iteration: bool = True,
     playbook_save_dir: Optional[str] = None,
+    enable_logging: bool = True,
+    log_base_dir: str = "experiments/logs",
 ) -> AdaptiveTrainingLoop:
     """
     High-level function to run adaptive training.
@@ -412,6 +490,8 @@ def run_adaptive_training(
         max_iterations: Maximum number of iterations to process
         save_playbook_every_iteration: Whether to save playbook after each iteration
         playbook_save_dir: Directory for playbook snapshots
+        enable_logging: Whether to enable comprehensive logging
+        log_base_dir: Base directory for logs
 
     Returns:
         AdaptiveTrainingLoop instance (after training completes)
@@ -459,6 +539,8 @@ def run_adaptive_training(
         experiment_name=experiment_name,
         save_playbook_every_iteration=save_playbook_every_iteration,
         playbook_save_dir=playbook_save_dir,
+        enable_logging=enable_logging,
+        log_base_dir=log_base_dir,
     )
 
     # Run training
