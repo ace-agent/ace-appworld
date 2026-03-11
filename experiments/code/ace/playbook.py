@@ -151,11 +151,11 @@ def apply_curator_operations(playbook_text, operations, next_id):
         
         if op_type == 'ADD':
             # Normalize section name from operation
-            section_raw = op.get('section', 'general')
+            section_raw = op.get('section', 'others')
             section = section_raw.lower().replace(' ', '_').replace('&', 'and').rstrip(':')
-            
+
             # Check if section exists, if not use 'others'
-            if section not in sections and section != 'general':
+            if section not in sections:
                 print(f"Warning: Section '{section_raw}' not found, adding to OTHERS")
                 section = 'others'
             

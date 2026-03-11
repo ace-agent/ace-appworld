@@ -53,10 +53,12 @@ class AdaptiveTrainingLoop:
         pruner: Optional[BasePruner] = None,
         num_rollouts_per_task: int = 1,
         experiment_name: Optional[str] = None,
+        max_iterations: Optional[int] = None,
         save_playbook_every_iteration: bool = True,
         playbook_save_dir: Optional[str] = None,
         enable_logging: bool = True,
         log_base_dir: str = "experiments/logs",
+        config_file_path: Optional[str] = None,
     ):
         """
         Args:
@@ -65,10 +67,12 @@ class AdaptiveTrainingLoop:
             pruner: Optional rollout pruner (if None, all rollouts sent to curator)
             num_rollouts_per_task: Number of rollouts to generate per task (m)
             experiment_name: Name for AppWorld experiment
+            max_iterations: Maximum number of iterations to process
             save_playbook_every_iteration: Whether to save playbook after each iteration
             playbook_save_dir: Directory to save intermediate playbooks
             enable_logging: Whether to enable comprehensive logging
             log_base_dir: Base directory for logs
+            config_file_path: Path to config file used for this run
         """
         self.agent = agent
         self.selector = selector
@@ -83,7 +87,10 @@ class AdaptiveTrainingLoop:
         if self.enable_logging:
             # Build config dict for logging
             config_dict = {
+                "config_file_path": config_file_path,
+                "max_iterations": max_iterations,
                 "num_rollouts_per_task": num_rollouts_per_task,
+                "save_playbook_every_iteration": save_playbook_every_iteration,
                 "selector": {
                     "algorithm": getattr(selector, 'algorithm', "unknown"),
                     "num_tasks_per_iteration": getattr(selector, 'num_tasks_per_iteration', 5),
@@ -546,6 +553,7 @@ def run_adaptive_training(
     playbook_save_dir: Optional[str] = None,
     enable_logging: bool = True,
     log_base_dir: str = "experiments/logs",
+    config_file_path: Optional[str] = None,
 ) -> AdaptiveTrainingLoop:
     """
     High-level function to run adaptive training.
@@ -606,10 +614,12 @@ def run_adaptive_training(
         pruner=pruner,
         num_rollouts_per_task=num_rollouts_per_task,
         experiment_name=experiment_name,
+        max_iterations=max_iterations,
         save_playbook_every_iteration=save_playbook_every_iteration,
         playbook_save_dir=playbook_save_dir,
         enable_logging=enable_logging,
         log_base_dir=log_base_dir,
+        config_file_path=config_file_path,
     )
 
     # Run training

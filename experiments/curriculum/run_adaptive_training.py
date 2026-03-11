@@ -211,6 +211,7 @@ def main():
             playbook_save_dir=playbook_save_dir,
             enable_logging=enable_logging,
             log_base_dir=log_base_dir,
+            config_file_path=args.config,
         )
 
         print("\n" + "="*80)
