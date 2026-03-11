@@ -196,7 +196,6 @@ class AdaptiveTrainingLogger:
         self,
         playbook_text: str,
         iteration: int,
-        metadata: Optional[Dict[str, Any]] = None,
     ):
         """
         Log a playbook version.
@@ -204,7 +203,6 @@ class AdaptiveTrainingLogger:
         Args:
             playbook_text: The playbook content
             iteration: Iteration number (0 = initial)
-            metadata: Optional metadata about this version
         """
         # Save playbook file
         filename = f"playbook_v{self.playbook_version:03d}_iter{iteration}.txt"
@@ -220,19 +218,6 @@ class AdaptiveTrainingLogger:
         if iteration > 0:
             for task_id in self.current_iteration_tasks:
                 self._track_task_contribution(task_id, iteration)
-
-        # Log metadata
-        version_metadata = {
-            "version": self.playbook_version,
-            "iteration": iteration,
-            "num_rules": len(playbook_text.split("\n")) if playbook_text else 0,
-            "timestamp": datetime.now().isoformat(),
-            "metadata": metadata or {},
-        }
-
-        metadata_path = self.playbooks_dir / f"playbook_v{self.playbook_version:03d}_metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(version_metadata, f, indent=2)
 
         self.playbook_version += 1
 

@@ -114,7 +114,6 @@ class AdaptiveTrainingLoop:
                 self.logger.log_playbook(
                     self.agent.playbook,
                     iteration=0,
-                    metadata={"type": "initial_playbook"},
                 )
         else:
             self.logger = None
@@ -214,7 +213,6 @@ class AdaptiveTrainingLoop:
                 self.logger.log_playbook(
                     self.agent.playbook,
                     iteration=self.iteration_count,
-                    metadata={"type": "after_iteration"},
                 )
 
             # Mark iteration complete
