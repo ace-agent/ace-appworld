@@ -383,6 +383,11 @@ class AdaptiveTrainingLogger:
             pruning_strategy: Strategy used for pruning
             metadata: Optional metadata
         """
+        # Update current_iteration_tasks to only include tasks that were kept after pruning
+        # These are the tasks that actually contributed to the playbook update
+        pruned_task_ids = list(set(r.task_id for r in pruned_rollouts))
+        self.current_iteration_tasks = pruned_task_ids
+
         # Get IDs of pruned and discarded rollouts
         pruned_ids = [
             f"{r.task_id}_attempt_{r.metadata.get('rollout_index', 0) + 1}"
