@@ -259,12 +259,13 @@ class AdaptiveTrainingLogger:
         for idx, rule in enumerate(rules):
             if rule not in self.rule_contributions:
                 # Brand new rule that never existed before
+                tasks = list(self.current_iteration_tasks) if iteration > 0 else []
                 self.rule_contributions[rule] = PlaybookRuleContribution(
                     rule_text=rule,
                     rule_index=idx,
                     first_added_iteration=iteration,
-                    contributing_tasks=list(self.current_iteration_tasks) if iteration > 0 else [],
-                    num_contributions=1 if iteration > 0 else 0,
+                    contributing_tasks=tasks,
+                    num_contributions=len(tasks),  # Count of contributing tasks
                 )
             elif rule in new_or_modified_rules:
                 # Rule existed before but was modified/re-added in this iteration
@@ -273,7 +274,8 @@ class AdaptiveTrainingLogger:
                 for task in self.current_iteration_tasks:
                     if task not in contrib.contributing_tasks:
                         contrib.contributing_tasks.append(task)
-                contrib.num_contributions += 1
+                # Update count to match number of unique contributing tasks
+                contrib.num_contributions = len(contrib.contributing_tasks)
 
         # Update previous playbook state for next comparison
         self.previous_playbook_rules = current_rules
@@ -587,7 +589,7 @@ class AdaptiveTrainingLogger:
         print(f"\n{'='*80}")
         print(f"EXPERIMENT COMPLETE")
         print(f"{'='*80}")
-        print(f"Duration: {duration / 60:.2f} minutes")
+        print(f"Duration: {duration / 60:.1f} minutes")
         print(f"Iterations: {self.iteration_count}")
         print(f"Playbook versions: {self.playbook_version}")
         print(f"Reflections: {len(self.reflection_logs)}")

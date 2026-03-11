@@ -31,8 +31,10 @@ local generator_model_config = {
 };
 
 local reflector_model_config = {
-    "name": "DeepSeek-V3.1",
-    "provider": "sambanova",
+    // "name": "DeepSeek-V3.1",
+    // "provider": "sambanova",
+    "name": "deepseek-ai/DeepSeek-V3.1",
+    "provider": "together",
     "temperature": 0,
     "seed": 100,
     "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],
@@ -48,8 +50,10 @@ local reflector_model_config = {
 };
 
 local curator_model_config = {
-    "name": "DeepSeek-V3.1",
-    "provider": "sambanova",
+    // "name": "DeepSeek-V3.1",
+    // "provider": "sambanova",
+    "name": "deepseek-ai/DeepSeek-V3.1",
+    "provider": "together",
     "temperature": 0,
     "seed": 100,
     "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],

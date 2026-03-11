@@ -309,10 +309,11 @@ class AdaptiveTrainingLoop:
                     rollout_info["test_failures"] = len(test_tracker.failures)
 
                     # Capture execution context for reflection
+                    # Note: trimmed_messages is a property, so we save the underlying messages
                     execution_context = {
                         "test_report": getattr(self.agent, 'test_report', None),
                         "world_gt_code": getattr(self.agent, 'world_gt_code', None),
-                        "trimmed_messages": list(getattr(self.agent, 'trimmed_messages', [])),
+                        "messages": list(getattr(self.agent, 'messages', [])),  # Save messages, not trimmed_messages
                         "step_number": getattr(self.agent, 'step_number', 0),
                     }
 
@@ -396,15 +397,19 @@ class AdaptiveTrainingLoop:
                     # Temporarily restore agent state for reflection
                     original_test_report = self.agent.test_report
                     original_world_gt_code = self.agent.world_gt_code
-                    original_trimmed_messages = self.agent.trimmed_messages
+                    original_messages = list(self.agent.messages)  # Save messages (trimmed_messages is a property)
                     original_step_number = self.agent.step_number
+                    original_file_console = self.agent.logger.file_console
 
                     try:
                         # Restore context
                         self.agent.test_report = execution_context.get("test_report")
                         self.agent.world_gt_code = execution_context.get("world_gt_code")
-                        self.agent.trimmed_messages = execution_context.get("trimmed_messages", [])
+                        self.agent.messages = list(execution_context.get("messages", []))  # Restore messages
                         self.agent.step_number = execution_context.get("step_number", 0)
+
+                        # Disable file logging to avoid I/O errors on closed files
+                        self.agent.logger.file_console = None
 
                         # Call reflector with restored context
                         reflection = self.agent.reflector_call()
@@ -424,8 +429,9 @@ class AdaptiveTrainingLoop:
                         # Restore original agent state
                         self.agent.test_report = original_test_report
                         self.agent.world_gt_code = original_world_gt_code
-                        self.agent.trimmed_messages = original_trimmed_messages
+                        self.agent.messages = original_messages  # Restore messages
                         self.agent.step_number = original_step_number
+                        self.agent.logger.file_console = original_file_console  # Restore file console
                 else:
                     # Fallback: Simple text-based reflection when no context or reflector disabled
                     if rollout.success and rollout.test_failures == 0:
