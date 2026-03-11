@@ -30,7 +30,7 @@ from appworld.evaluator import evaluate_task
 from appworld_experiments.code.ace.adaptation_agent import StarAgent
 from appworld_experiments.code.ace.rollout_pruner import BasePruner, RolloutInfo, create_pruner
 from appworld_experiments.code.ace.adaptive_training_logger import AdaptiveTrainingLogger
-from experiments.curriculum.adaptive_selector import AdaptiveQuestionSelector, create_selector
+from experiments.curriculum.adaptive_selector import AdaptiveQuestionSelector, SelectionResult, create_selector
 
 
 class AdaptiveTrainingLoop:
@@ -216,8 +216,14 @@ class AdaptiveTrainingLoop:
                 )
 
             # Mark iteration complete
+            # Only mark tasks from pruned rollouts as tried (discarded tasks go back to pool)
+            pruned_task_ids = list(set(r.task_id for r in pruned_rollouts))
+            pruned_batch = SelectionResult(
+                task_ids=pruned_task_ids,
+                metadata=iteration_result.metadata,
+            )
             self.selector.mark_batch_complete(
-                batch=iteration_result,
+                batch=pruned_batch,
                 playbook_text=self.agent.playbook,
             )
 
