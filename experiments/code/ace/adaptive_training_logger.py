@@ -331,11 +331,14 @@ class AdaptiveTrainingLogger:
             rollout_number: Sequential rollout number
             trajectory: Optional trajectory/execution log
         """
+        # Use 1-based rollout_index for consistency with attempt_N naming
+        rollout_index_display = rollout.metadata.get("rollout_index", 0) + 1
+
         rollout_data = {
             "rollout_number": rollout_number,
             "iteration": iteration,
             "task_id": rollout.task_id,
-            "rollout_index": rollout.metadata.get("rollout_index", 0),
+            "rollout_index": rollout_index_display,  # 1-based
             "success": rollout.success,
             "cost": rollout.cost,
             "num_steps": rollout.num_steps,
@@ -347,7 +350,7 @@ class AdaptiveTrainingLogger:
         }
 
         # Save individual rollout file
-        filename = f"rollout_{rollout_number:03d}_task_{rollout.task_id}_attempt_{rollout.metadata.get('rollout_index', 0) + 1}.json"
+        filename = f"rollout_{rollout_number:03d}_task_{rollout.task_id}_attempt_{rollout_index_display}.json"
         rollout_path = self.rollouts_dir / f"iter_{iteration:03d}" / filename
 
         with open(rollout_path, "w") as f:
@@ -397,7 +400,7 @@ class AdaptiveTrainingLogger:
             rollout_results=[
                 {
                     "task_id": r.task_id,
-                    "rollout_index": r.metadata.get("rollout_index", 0),
+                    "rollout_index": r.metadata.get("rollout_index", 0) + 1,  # 1-based to match attempt_N naming
                     "success": r.success,
                     "cost": r.cost,
                     "test_failures": r.test_failures,

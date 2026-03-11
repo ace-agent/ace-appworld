@@ -646,6 +646,12 @@ class AdaptiveQuestionSelector:
         else:
             raise ValueError("Must provide either dataset_path or task_ids")
 
+        # Store config for logging
+        self.algorithm = algorithm
+        self.num_tasks_per_iteration = num_tasks_per_iteration
+        self.dataset_path = dataset_path
+        self.no_repeat_tasks = no_repeat_tasks
+
         # Initialize selector
         selector_class = self.ALGORITHMS[algorithm]
         self.selector = selector_class(
@@ -655,7 +661,6 @@ class AdaptiveQuestionSelector:
         )
 
         # Track state
-        self.no_repeat_tasks = no_repeat_tasks
         self.tried_tasks: Set[str] = set()
         self.batch_history: List[SelectionResult] = []
         self.current_playbook: Optional[str] = None

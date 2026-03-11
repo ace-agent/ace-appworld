@@ -85,10 +85,10 @@ class AdaptiveTrainingLoop:
             config_dict = {
                 "num_rollouts_per_task": num_rollouts_per_task,
                 "selector": {
-                    "algorithm": selector.algorithm if hasattr(selector, 'algorithm') else "unknown",
-                    "num_tasks_per_iteration": selector.num_tasks_per_iteration if hasattr(selector, 'num_tasks_per_iteration') else None,
-                    "no_repeat_tasks": selector.no_repeat_tasks if hasattr(selector, 'no_repeat_tasks') else None,
-                    "dataset": selector.dataset_path if hasattr(selector, 'dataset_path') else None,
+                    "algorithm": getattr(selector, 'algorithm', "unknown"),
+                    "num_tasks_per_iteration": getattr(selector, 'num_tasks_per_iteration', 5),
+                    "no_repeat_tasks": getattr(selector, 'no_repeat_tasks', True),
+                    "dataset": getattr(selector, 'dataset_path', None),
                 },
                 "pruner": {
                     "strategy": pruner.strategy if pruner else None,
