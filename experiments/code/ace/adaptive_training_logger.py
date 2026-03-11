@@ -32,8 +32,8 @@ Output structure:
 
         rollouts/
             iter_001/
-                rollout_001_task_A_attempt_1.json
-                rollout_002_task_A_attempt_2.json
+                rollout_001_task_A_attempt_0.json
+                rollout_002_task_A_attempt_1.json
                 ...
 
         reflections/
@@ -92,7 +92,9 @@ class ReflectionLog:
     rollout_id: str
     reflection_text: str
     success: bool
-    test_failures: int
+    num_passed_tests: int
+    num_failed_tests: int
+    num_total_tests: int
     cost: float
     timestamp: str
 
@@ -218,10 +220,10 @@ class AdaptiveTrainingLogger:
         if iteration > 0:
             for task_id in self.current_iteration_tasks:
                 self._track_task_contribution(task_id, iteration)
+            # Only increment version for non-initial playbooks
+            self.playbook_version += 1
 
-        self.playbook_version += 1
-
-        print(f"Logged playbook version {self.playbook_version - 1} (iteration {iteration})")
+        print(f"Logged playbook version {self.playbook_version} (iteration {iteration})")
 
     def _analyze_playbook_rules(self, playbook_text: str, iteration: int):
         """
@@ -323,18 +325,20 @@ class AdaptiveTrainingLogger:
             rollout_number: Sequential rollout number
             trajectory: Optional trajectory/execution log
         """
-        # Use 1-based rollout_index for consistency with attempt_N naming
-        rollout_index_display = rollout.metadata.get("rollout_index", 0) + 1
+        # Use 0-based rollout_index
+        rollout_index = rollout.metadata.get("rollout_index", 0)
 
         rollout_data = {
             "rollout_number": rollout_number,
             "iteration": iteration,
             "task_id": rollout.task_id,
-            "rollout_index": rollout_index_display,  # 1-based
+            "rollout_index": rollout_index,  # 0-based
             "success": rollout.success,
             "cost": rollout.cost,
             "num_steps": rollout.num_steps,
-            "test_failures": rollout.test_failures,
+            "num_passed_tests": rollout.num_passed_tests,
+            "num_failed_tests": rollout.num_failed_tests,
+            "num_total_tests": rollout.num_total_tests,
             "has_reflection": rollout.reflection is not None,
             "trajectory": trajectory,
             "metadata": rollout.metadata,
@@ -342,7 +346,7 @@ class AdaptiveTrainingLogger:
         }
 
         # Save individual rollout file
-        filename = f"rollout_{rollout_number:03d}_task_{rollout.task_id}_attempt_{rollout_index_display}.json"
+        filename = f"rollout_{rollout_number:03d}_task_{rollout.task_id}_attempt_{rollout_index}.json"
         rollout_path = self.rollouts_dir / f"iter_{iteration:03d}" / filename
 
         with open(rollout_path, "w") as f:
@@ -373,14 +377,14 @@ class AdaptiveTrainingLogger:
         pruned_task_ids = list(set(r.task_id for r in pruned_rollouts))
         self.current_iteration_tasks = pruned_task_ids
 
-        # Get IDs of pruned and discarded rollouts
+        # Get IDs of pruned and discarded rollouts (0-based)
         pruned_ids = [
-            f"{r.task_id}_attempt_{r.metadata.get('rollout_index', 0) + 1}"
+            f"{r.task_id}_attempt_{r.metadata.get('rollout_index', 0)}"
             for r in pruned_rollouts
         ]
 
         all_ids = [
-            f"{r.task_id}_attempt_{r.metadata.get('rollout_index', 0) + 1}"
+            f"{r.task_id}_attempt_{r.metadata.get('rollout_index', 0)}"
             for r in all_rollouts
         ]
 
@@ -397,18 +401,20 @@ class AdaptiveTrainingLogger:
             rollout_results=[
                 {
                     "task_id": r.task_id,
-                    "rollout_index": r.metadata.get("rollout_index", 0) + 1,  # 1-based to match attempt_N naming
+                    "rollout_index": r.metadata.get("rollout_index", 0),  # 0-based
                     "success": r.success,
                     "cost": r.cost,
-                    "test_failures": r.test_failures,
+                    "num_passed_tests": r.num_passed_tests,
+                    "num_failed_tests": r.num_failed_tests,
+                    "num_total_tests": r.num_total_tests,
                 }
                 for r in all_rollouts
             ],
             pruned_rollout_ids=pruned_ids,
             discarded_rollout_ids=discarded_ids,
             num_reflections=sum(1 for r in pruned_rollouts if r.reflection),
-            playbook_version_before=self.playbook_version - 1,
-            playbook_version_after=self.playbook_version,
+            playbook_version_before=self.playbook_version,
+            playbook_version_after=self.playbook_version + 1,
             metadata=metadata or {},
         )
 
@@ -448,10 +454,12 @@ class AdaptiveTrainingLogger:
                     iteration_number=iteration,
                     reflection_id=reflection_id,
                     task_id=rollout.task_id,
-                    rollout_id=f"{rollout.task_id}_attempt_{rollout.metadata.get('rollout_index', 0) + 1}",
+                    rollout_id=f"{rollout.task_id}_attempt_{rollout.metadata.get('rollout_index', 0)}",
                     reflection_text=rollout.reflection,
                     success=rollout.success,
-                    test_failures=rollout.test_failures,
+                    num_passed_tests=rollout.num_passed_tests,
+                    num_failed_tests=rollout.num_failed_tests,
+                    num_total_tests=rollout.num_total_tests,
                     cost=rollout.cost,
                     timestamp=datetime.now().isoformat(),
                 )
@@ -480,7 +488,7 @@ class AdaptiveTrainingLogger:
         """
         # Find the rollout file
         rollout_number = rollout.metadata.get("rollout_number", 0)
-        filename = f"rollout_{rollout_number:03d}_task_{rollout.task_id}_attempt_{rollout.metadata.get('rollout_index', 0) + 1}.json"
+        filename = f"rollout_{rollout_number:03d}_task_{rollout.task_id}_attempt_{rollout.metadata.get('rollout_index', 0)}.json"
         rollout_path = self.rollouts_dir / f"iter_{iteration:03d}" / filename
 
         # Read existing data

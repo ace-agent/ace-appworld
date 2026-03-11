@@ -177,15 +177,15 @@ class AdaptiveTrainingLoop:
             rollouts = self._generate_rollouts(iteration_result.task_ids, starting_playbook)
 
             print(f"\nGenerated {len(rollouts)} rollouts")
-            print(f"  - Successful: {sum(1 for r in rollouts if r.success and r.test_failures == 0)}")
-            print(f"  - Failed: {sum(1 for r in rollouts if not r.success or r.test_failures > 0)}")
+            print(f"  - Successful: {sum(1 for r in rollouts if r.success and r.num_failed_tests == 0)}")
+            print(f"  - Failed: {sum(1 for r in rollouts if not r.success or r.num_failed_tests > 0)}")
 
             # Prune rollouts if pruner is configured
             if self.pruner:
                 pruned_rollouts = self.pruner.prune(rollouts)
                 print(f"Pruned to {len(pruned_rollouts)} rollouts for reflection")
-                print(f"  - Successful: {sum(1 for r in pruned_rollouts if r.success and r.test_failures == 0)}")
-                print(f"  - Failed: {sum(1 for r in pruned_rollouts if not r.success or r.test_failures > 0)}")
+                print(f"  - Successful: {sum(1 for r in pruned_rollouts if r.success and r.num_failed_tests == 0)}")
+                print(f"  - Failed: {sum(1 for r in pruned_rollouts if not r.success or r.num_failed_tests > 0)}")
             else:
                 pruned_rollouts = rollouts
                 print("No pruning - all rollouts sent to reflector")
@@ -274,7 +274,7 @@ class AdaptiveTrainingLoop:
             # Generate multiple rollouts for this task
             for rollout_index in range(self.num_rollouts_per_task):
                 rollout_counter += 1
-                print(f"\n--- Rollout {rollout_counter}/{total_rollouts} (Task: {task_id}, Attempt: {rollout_index + 1}/{self.num_rollouts_per_task}) ---")
+                print(f"\n--- Rollout {rollout_counter}/{total_rollouts} (Task: {task_id}, Attempt: {rollout_index}/{self.num_rollouts_per_task - 1}) ---")
 
                 # Reset agent's playbook to starting state
                 self.agent.playbook = starting_playbook
@@ -286,7 +286,12 @@ class AdaptiveTrainingLoop:
                     self.selector.get_progress()['tried_tasks'] + task_index
                 )
 
-                rollout_info = {"success": False, "test_failures": 0}
+                rollout_info = {
+                    "success": False,
+                    "num_passed_tests": 0,
+                    "num_failed_tests": 0,
+                    "num_total_tests": 0,
+                }
 
                 # Disable reflector and curator during rollout generation
                 # We only want generator + execution
@@ -310,8 +315,11 @@ class AdaptiveTrainingLoop:
                     # Evaluate to get results
                     test_tracker, test_report = evaluate_task(task_id, self.experiment_name)
 
-                    rollout_info["success"] = len(test_tracker.failures) == 0
-                    rollout_info["test_failures"] = len(test_tracker.failures)
+                    # Use AppWorld's success property directly
+                    rollout_info["success"] = test_tracker.success
+                    rollout_info["num_passed_tests"] = test_tracker.pass_count
+                    rollout_info["num_failed_tests"] = test_tracker.fail_count
+                    rollout_info["num_total_tests"] = test_tracker.num_tests
 
                     # Capture execution context for reflection
                     # Note: trimmed_messages is a property, so we save the underlying messages
@@ -325,9 +333,11 @@ class AdaptiveTrainingLoop:
                 except Exception as e:
                     print(f"  Error generating rollout: {e}")
                     rollout_info["success"] = False
-                    # test_failures=999 is a sentinel value indicating an exception occurred
+                    # num_failed_tests=999 is a sentinel value indicating an exception occurred
                     # during rollout generation (not an actual test failure count)
-                    rollout_info["test_failures"] = 999
+                    rollout_info["num_passed_tests"] = 0
+                    rollout_info["num_failed_tests"] = 999
+                    rollout_info["num_total_tests"] = 999
 
                 finally:
                     # Restore original settings
@@ -344,7 +354,9 @@ class AdaptiveTrainingLoop:
                     success=rollout_info["success"],
                     cost=rollout_cost,
                     num_steps=getattr(self.agent, 'step_number', 0),
-                    test_failures=rollout_info["test_failures"],
+                    num_passed_tests=rollout_info["num_passed_tests"],
+                    num_failed_tests=rollout_info["num_failed_tests"],
+                    num_total_tests=rollout_info["num_total_tests"],
                     reflection=None,  # Will be added after pruning
                     metadata={
                         "task_index": task_index,
@@ -366,7 +378,8 @@ class AdaptiveTrainingLoop:
                     )
 
                 print(f"  Rollout complete: success={rollout.success}, cost={rollout.cost:.2f}, "
-                      f"steps={rollout.num_steps}, test_failures={rollout.test_failures}")
+                      f"steps={rollout.num_steps}, passed={rollout.num_passed_tests}, "
+                      f"failed={rollout.num_failed_tests}, total={rollout.num_total_tests}")
 
         # Reset playbook to starting state after all rollouts
         self.agent.playbook = starting_playbook
@@ -392,7 +405,7 @@ class AdaptiveTrainingLoop:
 
         for idx, rollout in enumerate(rollouts):
             print(f"  Generating reflection {idx + 1}/{len(rollouts)} for {rollout.task_id} "
-                  f"(success={rollout.success}, test_failures={rollout.test_failures})")
+                  f"(success={rollout.success}, failed={rollout.num_failed_tests})")
 
             try:
                 # Restore execution context from rollout metadata
@@ -439,12 +452,12 @@ class AdaptiveTrainingLoop:
                         self.agent.logger.file_console = original_file_console  # Restore file console
                 else:
                     # Fallback: Simple text-based reflection when no context or reflector disabled
-                    if rollout.success and rollout.test_failures == 0:
+                    if rollout.success and rollout.num_failed_tests == 0:
                         reflection = f"Task {rollout.task_id} completed successfully."
-                    elif rollout.test_failures == 999:
+                    elif rollout.num_failed_tests == 999:
                         reflection = f"Task {rollout.task_id} encountered an error during execution."
                     else:
-                        reflection = f"Task {rollout.task_id} failed with {rollout.test_failures} test failures."
+                        reflection = f"Task {rollout.task_id} failed with {rollout.num_failed_tests} test failures."
 
                     reflections.append(reflection)
                     rollout.reflection = reflection

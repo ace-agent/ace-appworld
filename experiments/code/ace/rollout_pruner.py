@@ -18,7 +18,9 @@ class RolloutInfo:
     success: bool  # Whether task completed successfully
     cost: float  # Token cost
     num_steps: int  # Number of ReAct steps taken
-    test_failures: int  # Number of test failures
+    num_passed_tests: int  # Number of passed tests (from AppWorld TestTracker.pass_count)
+    num_failed_tests: int  # Number of failed tests (from AppWorld TestTracker.fail_count)
+    num_total_tests: int  # Total number of tests (from AppWorld TestTracker.num_tests)
     reflection: Optional[str] = None  # Reflection text (if any)
     metadata: Dict[str, Any] = None  # Additional metadata
 
@@ -92,8 +94,8 @@ class FailureFirstPruner(BasePruner):
             return rollouts
 
         # Split into failures and successes
-        failures = [r for r in rollouts if not r.success or r.test_failures > 0]
-        successes = [r for r in rollouts if r.success and r.test_failures == 0]
+        failures = [r for r in rollouts if not r.success or r.num_failed_tests > 0]
+        successes = [r for r in rollouts if r.success and r.num_failed_tests == 0]
 
         # Prioritize failures
         selected = []
@@ -147,8 +149,8 @@ class DiversePruner(BasePruner):
             return rollouts
 
         # Split into categories
-        failures = [r for r in rollouts if not r.success or r.test_failures > 0]
-        successes = [r for r in rollouts if r.success and r.test_failures == 0]
+        failures = [r for r in rollouts if not r.success or r.num_failed_tests > 0]
+        successes = [r for r in rollouts if r.success and r.num_failed_tests == 0]
 
         # Aim for 60% failures, 40% successes (if possible)
         num_failures = min(
@@ -204,9 +206,9 @@ class MostInformativePruner(BasePruner):
         # Categorize rollouts
         failures = [
             r for r in rollouts
-            if not r.success or r.test_failures > 0
+            if not r.success or r.num_failed_tests > 0
         ]
-        successes = [r for r in rollouts if r.success and r.test_failures == 0]
+        successes = [r for r in rollouts if r.success and r.num_failed_tests == 0]
 
         # Sort by cost within each category
         sorted_failures = sorted(failures, key=lambda r: r.cost, reverse=True)
