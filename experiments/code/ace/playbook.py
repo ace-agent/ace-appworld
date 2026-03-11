@@ -110,13 +110,15 @@ def apply_curator_operations(playbook_text, operations, next_id):
     - DELETE: Remove outdated or incorrect bullets (if needed)
     """
     lines = playbook_text.strip().split('\n')
-    
+
     # Build section map
     sections = {}
-    current_section = "general"
+    current_section = "others"  # Default to 'others' for content before first section header
     section_line_map = {}  # Track which line each section header is on
-    # import pdb
-    # pdb.set_trace()
+
+    # Initialize 'others' section in case there's content before any section headers
+    sections[current_section] = []
+
     for i, line in enumerate(lines):
         if line.strip().startswith('##'):
             # Extract section name and normalize it
@@ -128,6 +130,9 @@ def apply_curator_operations(playbook_text, operations, next_id):
             if current_section not in sections:
                 sections[current_section] = []
         elif line.strip():
+            # Ensure current section exists before appending
+            if current_section not in sections:
+                sections[current_section] = []
             sections[current_section].append((i, line))
     
     # Process operations
@@ -231,9 +236,9 @@ def get_playbook_stats(playbook_text):
         'total_bullets': 0,
         'by_section': {}
     }
-    
-    current_section = 'general'
-    
+
+    current_section = 'others'
+
     for line in lines:
         if line.strip().startswith('##'):
             current_section = line.strip()[2:].strip()
