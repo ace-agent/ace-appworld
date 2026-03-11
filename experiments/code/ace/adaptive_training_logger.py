@@ -323,7 +323,12 @@ class AdaptiveTrainingLogger:
             iteration: Iteration number
             rollout: RolloutInfo object
             rollout_number: Sequential rollout number
-            trajectory: Optional trajectory/execution log
+            trajectory: Optional trajectory/execution log (currently not used)
+                       Note: The agent's full conversation history (messages) is stored
+                       in rollout.metadata["execution_context"]["messages"] for use
+                       during reflection generation. The trajectory field here is
+                       reserved for future use if we want to store a formatted/
+                       human-readable execution trace separate from the raw messages.
         """
         # Use 0-based rollout_index
         rollout_index = rollout.metadata.get("rollout_index", 0)
@@ -340,8 +345,8 @@ class AdaptiveTrainingLogger:
             "num_failed_tests": rollout.num_failed_tests,
             "num_total_tests": rollout.num_total_tests,
             "has_reflection": rollout.reflection is not None,
-            "trajectory": trajectory,
-            "metadata": rollout.metadata,
+            "trajectory": trajectory,  # Currently null; raw messages in metadata["execution_context"]["messages"]
+            "metadata": rollout.metadata,  # Contains execution_context with full agent message history
             "timestamp": datetime.now().isoformat(),
         }
 
