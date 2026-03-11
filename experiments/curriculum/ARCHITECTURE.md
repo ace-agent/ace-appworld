@@ -430,49 +430,6 @@ Playbook updated based on pruned rollouts
 Progress: 5/100 tasks (5.0%) - Iteration 1 complete
 ```
 
-## Performance Considerations
-
-### Computational Cost
-
-**Without Pruning (k=n×m):**
-- Generate n×m rollouts
-- Generate n×m reflections
-- Curator processes n×m reflections
-- Cost ≈ n×m × (rollout_cost + reflection_cost + curator_cost)
-
-**With Pruning (k < n×m):**
-- Generate n×m rollouts
-- Generate k reflections (only for pruned rollouts)
-- Curator processes k reflections
-- Cost ≈ n×m × rollout_cost + k × (reflection_cost + curator_cost)
-- Savings: (n×m - k) × (reflection_cost + curator_cost)
-
-**Example:**
-- n=5 tasks, m=2 rollouts/task → n×m=10 total rollouts
-- k=3 (prune to 3)
-- Rollout cost: $0.50 each
-- Reflection cost: $0.15 each
-- Curator cost: $0.20 each
-- Without pruning: 10 × ($0.50 + $0.15 + $0.20) = $8.50
-- With pruning: 10 × $0.50 + 3 × ($0.15 + $0.20) = $6.05
-- **Savings: 29%**
-
-### Training Quality
-
-**More rollouts to reflector (larger k):**
-- Pros: More diverse learning signals from reflections
-- Cons: May include noisy/low-quality rollouts
-
-**Fewer rollouts to reflector (smaller k):**
-- Pros: Only highest quality learning signals from best rollouts
-- Cons: May miss edge cases
-
-**Recommended:**
-- Start with k ≈ (n×m)/2 to (n×m)/3
-- Example: n=5, m=2 → 10 rollouts → k=3 to 5
-- Use `failure_first` or `most_informative` strategies
-- Adjust based on playbook growth rate
-
 ## Future Enhancements
 
 1. **Parallel Rollout Generation**: Generate n×m rollouts in parallel (currently sequential)
