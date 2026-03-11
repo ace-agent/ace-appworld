@@ -124,8 +124,10 @@ class Agent(FromDict):
         self.logger.initialize(
             experiment_name=experiment_name,
             num_tasks=num_tasks,
-            num_processes=num_processes,
-            process_index=process_index,
+            extra_experiment_info={
+                "num_processes": num_processes,
+                "process_index": process_index,
+            }
         )
         for task_id in task_ids:
             self.solve_task(task_id, experiment_name)

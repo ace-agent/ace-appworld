@@ -563,12 +563,13 @@ class AdaptiveTrainingLogger:
         with open(history_path, "w") as f:
             json.dump(history, f, indent=2)
 
-    def save_summary(self, final_metadata: Optional[Dict[str, Any]] = None):
+    def save_summary(self, final_metadata: Optional[Dict[str, Any]] = None, final_playbook_path: Optional[str] = None):
         """
         Save final experiment summary.
 
         Args:
             final_metadata: Optional final metadata
+            final_playbook_path: Optional path to the final saved playbook
         """
         end_time = datetime.now()
         duration = (end_time - self.start_time).total_seconds()
@@ -583,6 +584,7 @@ class AdaptiveTrainingLogger:
             "total_playbook_versions": self.playbook_version,
             "total_reflections": len(self.reflection_logs),
             "total_rules": len(self.rule_contributions),
+            "final_playbook_path": final_playbook_path,
             "final_metadata": final_metadata or {},
         }
 
@@ -598,5 +600,7 @@ class AdaptiveTrainingLogger:
         print(f"Playbook versions: {self.playbook_version}")
         print(f"Reflections: {len(self.reflection_logs)}")
         print(f"Rules: {len(self.rule_contributions)}")
+        if final_playbook_path:
+            print(f"Final playbook: {final_playbook_path}")
         print(f"\nLogs saved to: {self.log_dir}")
         print(f"{'='*80}\n")

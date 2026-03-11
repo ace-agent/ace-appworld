@@ -237,12 +237,15 @@ class AdaptiveTrainingLoop:
                   f"Iteration {self.iteration_count} complete\n")
 
         print(f"\nTraining complete! Processed {self.iteration_count} iterations")
-        self._save_final_playbook()
+        final_playbook_path = self._save_final_playbook()
 
         # Save final summary
         if self.logger:
             progress = self.selector.get_progress()
-            self.logger.save_summary(final_metadata=progress)
+            self.logger.save_summary(
+                final_metadata=progress,
+                final_playbook_path=final_playbook_path
+            )
 
     def _generate_rollouts(
         self,
@@ -544,9 +547,9 @@ class AdaptiveTrainingLoop:
         print(f"Saved playbook snapshot: {snapshot_path}")
 
     def _save_final_playbook(self):
-        """Save final trained playbook"""
+        """Save final trained playbook and return the path"""
         if not self.agent.playbook:
-            return
+            return None
 
         if hasattr(self.agent, 'trained_playbook_file_path') and self.agent.trained_playbook_file_path:
             final_path = self.agent.trained_playbook_file_path
@@ -557,6 +560,7 @@ class AdaptiveTrainingLoop:
             f.write(self.agent.playbook)
 
         print(f"Saved final playbook: {final_path}")
+        return final_path
 
 
 def run_adaptive_training(
