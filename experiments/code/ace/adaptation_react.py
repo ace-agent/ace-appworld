@@ -366,10 +366,10 @@ class SimplifiedReActStarAgent(StarAgent):
          
         # add full conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
-        trimmed_messages = self.trimmed_messages[:19]
+        trimmed_messages = self.trimmed_messages[:1]#[:19]
         post_messages = self.trimmed_messages[self.num_instruction_messages - 1 :]
         last_message = trimmed_messages[-1]['content']
-        last_message = last_message[:last_message.index("USER")]
+        #last_message = last_message[:last_message.index("USER")]
         trimmed_messages[-1]['content'] = last_message
         trimmed_messages = trimmed_messages + post_messages
         for i, msg in enumerate(trimmed_messages):

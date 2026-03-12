@@ -22,7 +22,7 @@ local generator_model_config = {
 };
 
 local reflector_model_config = {
-    "name": "/import/ml-sc-nlpcheckpoints-scratch3/jonathanl/generic_checkpoints/Qwen2.5-1.5B-Instruct",
+    "name": "/import/ml-sc-nlpcheckpoints-scratch3/jonathanl/generic_checkpoints/Qwen2.5-7B-Instruct",
     "temperature": 0,
     "lora_r":  16,
     "lora_alpha": 32,

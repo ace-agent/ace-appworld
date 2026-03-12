@@ -152,8 +152,8 @@ class StarAgent(FromDict):
                             # call restem 
                             breakpoint()
                             print("test errors")
-                            curr_flips += self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
-                            #reasoning_text = self.reflector_call()
+                            #curr_flips += self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
+                            reasoning_text = self.reflector_call()
                         else:
                             task_success = True
                             print(f"{task_id} passed unit tests in retry: {retry_id} and step_number: {self.step_number}")
