@@ -11,6 +11,7 @@ from appworld_experiments.code.ace.lite_llm_generator import LiteLLMGenerator
 from appworld_experiments.code.ace.logger import Logger
 
 from appworld.evaluator import evaluate_task
+from appworld_experiments.code.ace.hf_policy import HFPolicy
 
 @dataclass
 class ExecutionIO:
@@ -33,9 +34,18 @@ class StarAgent(FromDict):
         use_gt_code: bool = False,
     ):
         self.generator_model = LiteLLMGenerator(**generator_model_config)
-        self.reflector_model = LiteLLMGenerator(**reflector_model_config)
+        #self.reflector_model = LiteLLMGenerator(**reflector_model_config)
         self.curator_model = LiteLLMGenerator(**curator_model_config)
-
+        refl_cfg = reflector_model_config
+        self.reflector_model = HFPolicy(
+              refl_cfg["name"],
+              trainable_lora=True,
+              bf16=refl_cfg["bf16"],
+              lora_r=refl_cfg["lora_r"],
+              lora_alpha=refl_cfg["lora_alpha"],
+              lora_dropout=refl_cfg["lora_dropout"],
+              lora_target_modules=refl_cfg["lora_target_modules"],
+        )
         self.messages: list[dict] = []
         self.max_steps = max_steps
         self.step_number = 0
@@ -58,14 +68,16 @@ class StarAgent(FromDict):
         self.playbook = ''
         self.current_task_index = 0  # Global variable to track current task index
         self.trained_playbook_file_path = None
-        self.num_retries = 5
+        self.trained_checkpoints = None 
+        self.num_retries = 1
         self.use_gt_code = use_gt_code
-
+        self.refl_cfg = refl_cfg 
+      
     def initialize(self, world: AppWorld):
         self.world = world
         if self.log_lm_calls:
             self.generator_model.log_calls_to(world=world)
-            self.reflector_model.log_calls_to(world=world)
+            #self.reflector_model.log_calls_to(world=world)
             self.curator_model.log_calls_to(world=world)
         self.cost_tracker.reset(world.task_id)
         self.step_number = 0
@@ -88,6 +100,7 @@ class StarAgent(FromDict):
         task_success = False
         reasoning_text = ""
 
+        curr_flips = 0 
         for retry_id in range(self.num_retries):
             with AppWorld(
                 task_id=task_id, experiment_name=experiment_name, **self.appworld_config
@@ -100,6 +113,7 @@ class StarAgent(FromDict):
                     raise ValueError(f"GT code not found for task: {task_id}")
                 print("---Max steps---: ", self.max_steps)
                 print("GT Code: \n", gt_code)
+                
                 self.step_number = 0
                 for _ in range(self.max_steps):
                     self.step_number += 1
@@ -110,7 +124,7 @@ class StarAgent(FromDict):
 
                     if reflection:
                         reflections.append(reflection)
-
+                    
                     if len(execution_inputs) != 0:
                         execution_outputs = [
                             ExecutionIO(
@@ -132,14 +146,19 @@ class StarAgent(FromDict):
                     self.cost_tracker.add(task_id, cost)
                     self.log_cost()
                     if world.task_completed() or self.cost_tracker.exceeded():
-                        self.curator_call()
+                        self.playbook = self.curator_call()
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
-                        if len(test_tracker.failures)>0:
+                        if len(test_tracker.failures) > 0:
+                            # call restem 
+                            breakpoint()
+                            print("test errors")
+                            #curr_flips += self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
                             reasoning_text = self.reflector_call()
                         else:
                             task_success = True
                             print(f"{task_id} passed unit tests in retry: {retry_id} and step_number: {self.step_number}")
                         break
+
                 if task_success:
                     break
 
@@ -148,6 +167,7 @@ class StarAgent(FromDict):
             self.save_playbook_snapshot()
 
         self.logger.complete_task()
+        return curr_flips 
 
     def solve_task_wo_gt(self, task_id: str, experiment_name: str | None = None):
         self.star_guide_idx = None
@@ -192,7 +212,7 @@ class StarAgent(FromDict):
                 self.log_cost()
                 if world.task_completed() or self.cost_tracker.exceeded():
                     test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
-                    self.curator_call()
+                    self.playbook = self.curator_call()
                     break
                         
         # Save playbook every 30 tasks
@@ -206,7 +226,7 @@ class StarAgent(FromDict):
         self.cost_tracker.reset(task_id)
 
         if self.use_gt_code:
-            self.solve_task_with_gt(task_id, experiment_name)
+            return self.solve_task_with_gt(task_id, experiment_name)
         else:
             self.solve_task_wo_gt(task_id, experiment_name)
 
@@ -226,9 +246,11 @@ class StarAgent(FromDict):
             num_processes=num_processes,
             process_index=process_index,
         )
+        num_flips = 0 
         for task_index, task_id in enumerate(task_ids):
             self.current_task_index = task_index
-            self.solve_task(task_id, experiment_name)
+            num_flips += self.solve_task(task_id, experiment_name)
+        print("total flips ", num_flips)
 
     def log_cost(self) -> None:
         self.cost_tracker.save(os.path.join(self.world.output_misc_directory, "cost.txt"))
