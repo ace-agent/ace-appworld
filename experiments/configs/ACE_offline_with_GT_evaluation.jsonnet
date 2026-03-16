@@ -5,8 +5,8 @@ local experiment_configs_path = project_home_path + "/experiments/configs";
 local experiment_code_path = project_home_path + "/experiments/code";
 
 local generator_model_config = {
-    "name": "DeepSeek-V3.1",
-    "provider": "sambanova",
+    "name": "deepseek-ai/DeepSeek-V3.1",
+    "provider": "together",
     "temperature": 0,
     "seed": 100,
     "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],
@@ -36,7 +36,7 @@ local generator_model_config = {
                 "verbose": true,
             },
             "generator_prompt_file_path": experiment_prompts_path + "/appworld_react_generator_prompt.txt",
-            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook.txt",  
+            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook_ref_qwen_1.5b.txt",  
             "ignore_multiple_calls": true,
             "max_steps": 40,
             "max_cost_overall": 1000,

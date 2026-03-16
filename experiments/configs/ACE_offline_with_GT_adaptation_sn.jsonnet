@@ -22,25 +22,20 @@ local generator_model_config = {
 };
 
 local reflector_model_config = {
-    "name": "/import/ml-sc-nlpcheckpoints-scratch3/jonathanl/generic_checkpoints/Qwen2.5-3B-Instruct",
+    "name": "DeepSeek-V3.1",
+    "provider": "sambanova",
     "temperature": 0,
-    "lora_r":  16,
-    "lora_alpha": 32,
-    "lora_dropout": 0.05,
-    "lora_target_modules": [
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj",
-    ],
-
-    "sft_max_seq_len": 2048,
-    "sft_microbatch_size": 1,
-    "sft_grad_accum_steps": 8,
-    "sft_lr": 2e-4, 
-    "sft_epochs": 1,
-
-    # Misc
-    "bf16": true,
-    "seed": 42
+    "seed": 100,
+    "stop": ["<|endoftext|>", "<|eot_id|>", "<|start_header_id|>"],
+    "logprobs": false,
+    "top_logprobs": null,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "n": 1,
+    "response_format": {"type": "text"},
+    "retry_after_n_seconds": 10,
+    "use_cache": true,
+    "max_retries": 50,
 };
 
 local curator_model_config = {
@@ -77,12 +72,10 @@ local curator_model_config = {
                 "verbose": true,
             },
             "generator_prompt_file_path": experiment_prompts_path + "/appworld_react_generator_prompt.txt",
-            "main_reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_with_gt_prompt.txt",
-            "supplement_reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_test_report.txt",
+            "reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_with_gt_prompt.txt",
             "curator_prompt_file_path": experiment_prompts_path + "/appworld_react_curator_prompt.txt", 
             "initial_playbook_file_path": experiment_playbooks_path + "/appworld_initial_playbook.txt", 
-            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook_ref_qwen_1.5b.txt",  
-            "trained_checkpoints" : experiment_playbooks_path + "/appworld_offline_trained_with_gt_lora_checkpoints",
+            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook.txt",  
             "ignore_multiple_calls": true,
             "max_steps": 40,
             "max_cost_overall": 1000,

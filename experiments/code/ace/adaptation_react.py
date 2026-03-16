@@ -18,7 +18,8 @@ class SimplifiedReActStarAgent(StarAgent):
     def __init__(
         self,
         generator_prompt_file_path: str | None = None,
-        reflector_prompt_file_path: str | None = None,
+        main_reflector_prompt_file_path: str | None = None,
+        supplement_reflector_prompt_file_path: str | None = None, 
         curator_prompt_file_path: str | None = None,
         initial_playbook_file_path: str | None = None,
         trained_playbook_file_path: str | None = None,
@@ -30,7 +31,8 @@ class SimplifiedReActStarAgent(StarAgent):
     ):
         super().__init__(**kwargs)
         self.generator_prompt_template = read_file(generator_prompt_file_path.replace("/", os.sep)).lstrip()
-        self.reflector_prompt = read_file(reflector_prompt_file_path.replace("/", os.sep))
+        self.reflector_prompt = read_file(main_reflector_prompt_file_path.replace("/", os.sep))
+        self.reflector_prompt_test_report = read_file(supplement_reflector_prompt_file_path.replace("/", os.sep))
         self.curator_prompt_file_path = curator_prompt_file_path
         self.curator_prompt = read_file(curator_prompt_file_path.replace("/", os.sep))
         self.trained_playbook_file_path = trained_playbook_file_path
@@ -313,6 +315,7 @@ class SimplifiedReActStarAgent(StarAgent):
                     if world.task_completed() or self.cost_tracker.exceeded():
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
                         if original_failures - len(test_tracker.failures) > 0: # can loosen this 
+                            breakpoint()
                             # successfull train sample 
                             num_flips += 1 
                             refl_buffer.append(SFTExample(prompt=refl_prompt, completion=refl_out))
@@ -351,11 +354,16 @@ class SimplifiedReActStarAgent(StarAgent):
         Let the reflector generate insights based on the full conversation history, i.e. all messages and ground truths (if any).
         """
 
+        if self.test_report is not None:
+            prompt_template = self.reflector_prompt_test_report
+        else:
+            prompt_template = self.reflector_prompt
+
         ### needs to be changed to for 1B/3B smaller reflector model 
         filled_prompt = (
-            self.reflector_prompt
+             prompt_template
             .replace("{{ground_truth_code}}", self.world_gt_code or "")
-            .replace("{{test_report}}", self.test_report or "")
+            .replace("{{failed_test_summary}}", self.test_report or "")
             .replace("{{generated_code}}", "See full conversation history below")
             .replace("{{generated_rationale}}", "See full conversation history below")
             .replace("{{spec_or_api_docs}}", "See full conversation history below")
@@ -381,21 +389,17 @@ class SimplifiedReActStarAgent(StarAgent):
         output = self.reflector_model.generate(messages, max_new_tokens=750)
         match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
         reasoning_text = match.group(1) if match else None
-        breakpoint()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
             self.logger.show_message(role="user", message="[WARN] reasoning_text is empty or None", step_number=self.step_number)
-
         return filled_prompt, reasoning_text
     
     def curator_call(self, reasoning_text: str = None, playbook: str = None):
         """
         Let the curator update the playbook based on the full conversation history, i.e. all messages and reflections.
         """
-        
-        if self.use_reflector:
-            breakpoint()
+        if self.use_reflector and reasoning_text is None:
             print("curator call")
             _, reasoning_text = self.reflector_call()
 
