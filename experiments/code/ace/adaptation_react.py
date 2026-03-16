@@ -315,9 +315,9 @@ class SimplifiedReActStarAgent(StarAgent):
                     if world.task_completed() or self.cost_tracker.exceeded():
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
                         if original_failures - len(test_tracker.failures) > 0: # can loosen this 
-                            breakpoint()
                             # successfull train sample 
                             num_flips += 1 
+                            breakpoint()
                             refl_buffer.append(SFTExample(prompt=refl_prompt, completion=refl_out))
                         break
 
@@ -387,8 +387,31 @@ class SimplifiedReActStarAgent(StarAgent):
         filled_prompt += conversation_history
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
-        match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
-        reasoning_text = match.group(1) if match else None
+        #match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
+        #reasoning_text = match.group(1) if match else None
+        '''
+        fenced = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
+        if fenced:
+            reasoning_text = fenced.group(1).strip()
+        else:
+            match = re.search(r'(\{[\s\S]*\})\s*$', output)
+            if match:
+                text = match.group(1)
+                # normalize double braces
+                if text.startswith("{{") and text.endswith("}}"):
+                    reasoning_text = text[1:-1]
+            else: reasoning_text = None
+        '''
+        matches = re.findall(r'\{\{[\s\S]*?\}\}|\{[\s\S]*?\}', output)
+
+        if not matches:
+            reasoning_text = None
+        else:
+            text = matches[-1]
+            # normalize {{ ... }} -> { ... }
+            if text.startswith("{{") and text.endswith("}}"):
+                text = text[1:-1]
+            reasoning_text = text.strip()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
@@ -400,9 +423,7 @@ class SimplifiedReActStarAgent(StarAgent):
         Let the curator update the playbook based on the full conversation history, i.e. all messages and reflections.
         """
         if self.use_reflector and reasoning_text is None:
-            print("curator call")
             _, reasoning_text = self.reflector_call()
-
         # Current playbook and question context
         if playbook is not None:
             current_playbook = playbook 
