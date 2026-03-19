@@ -371,7 +371,7 @@ class SimplifiedReActStarAgent(StarAgent):
             .replace("{{playbook}}", self.playbook or "N/A")
             .replace("{{previous_reflection}}", "N/A")
         )
-         
+        
         # add full conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
         trimmed_messages = self.trimmed_messages[:1]#[:19]
