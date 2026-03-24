@@ -22,7 +22,7 @@ local generator_model_config = {
 };
 
 local reflector_model_config = {
-    "name": "/import/ml-sc-nlpcheckpoints-scratch3/jonathanl/generic_checkpoints/Qwen2.5-3B-Instruct",
+    "name": "/import/ml-sc-nlpcheckpoints-scratch3/jonathanl/generic_checkpoints/Qwen2.5-7B-Instruct",
     "temperature": 0,
     "lora_r":  16,
     "lora_alpha": 32,
@@ -79,6 +79,7 @@ local curator_model_config = {
             "generator_prompt_file_path": experiment_prompts_path + "/appworld_react_generator_prompt.txt",
             "main_reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_with_gt_prompt.txt",
             "supplement_reflector_prompt_file_path": experiment_prompts_path + "/appworld_react_reflector_test_report.txt",
+            "summarize_test_prompt_file_path": experiment_prompts_path + "/appworld_summarize_test_report.txt",
             "curator_prompt_file_path": experiment_prompts_path + "/appworld_react_curator_prompt.txt", 
             "initial_playbook_file_path": experiment_playbooks_path + "/appworld_initial_playbook.txt", 
             "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook_ref_qwen_1.5b.txt",  

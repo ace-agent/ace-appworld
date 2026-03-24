@@ -86,7 +86,7 @@ class HFPolicy:
         device = next(self.model.parameters()).device
         inputs = {k: v.to(device) for k, v in inputs.items()}
         input_ids = inputs["input_ids"]
-        breakpoint()
+
         #stop_str = "</json>"
         #stop_ids = self.tokenizer.encode(stop_str, add_special_tokens=False)
         #stopping = StoppingCriteriaList([StopOnSubsequence(stop_ids)])
@@ -102,8 +102,8 @@ class HFPolicy:
             #stopping_criteria=stopping,
         )
         text = self.tokenizer.decode(out[0], skip_special_tokens=True)
-        #generated_ids = out[0][input_ids.shape[1]:]
-        #text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        generated_ids = out[0][input_ids.shape[1]:]
+        text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         #if text.startswith(prompt):
         #    return text[len(prompt):].strip()
         return text.strip()

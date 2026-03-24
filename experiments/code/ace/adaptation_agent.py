@@ -151,8 +151,8 @@ class StarAgent(FromDict):
                         if len(test_tracker.failures) > 0:
                             # call restem 
                             print("test errors")
-                            breakpoint()
-                            curr_flips += self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
+                            curr_flips, best_self_edit = self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
+                            #self.curator_call() -> check again 
                             #reasoning_text = self.reflector_call()
                         else:
                             task_success = True

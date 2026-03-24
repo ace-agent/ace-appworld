@@ -20,6 +20,7 @@ class SimplifiedReActStarAgent(StarAgent):
         generator_prompt_file_path: str | None = None,
         main_reflector_prompt_file_path: str | None = None,
         supplement_reflector_prompt_file_path: str | None = None, 
+        summarize_test_prompt_file_path: str | None = None, 
         curator_prompt_file_path: str | None = None,
         initial_playbook_file_path: str | None = None,
         trained_playbook_file_path: str | None = None,
@@ -33,6 +34,7 @@ class SimplifiedReActStarAgent(StarAgent):
         self.generator_prompt_template = read_file(generator_prompt_file_path.replace("/", os.sep)).lstrip()
         self.reflector_prompt = read_file(main_reflector_prompt_file_path.replace("/", os.sep))
         self.reflector_prompt_test_report = read_file(supplement_reflector_prompt_file_path.replace("/", os.sep))
+        self.summarize_test_report_prompt = read_file(summarize_test_prompt_file_path.replace("/", os.sep))
         self.curator_prompt_file_path = curator_prompt_file_path
         self.curator_prompt = read_file(curator_prompt_file_path.replace("/", os.sep))
         self.trained_playbook_file_path = trained_playbook_file_path
@@ -267,7 +269,8 @@ class SimplifiedReActStarAgent(StarAgent):
         playbook = self.playbook
         num_flips = 0 
         refl_buffer: List[SFTExample] = []
-
+        best_self_edit = None 
+        max_diff = 0 
         for k in range(self.num_candidates):
             refl_prompt, refl_out = self.reflector_call()
             tmp_playbook = self.curator_call(refl_out, playbook)
@@ -314,10 +317,16 @@ class SimplifiedReActStarAgent(StarAgent):
 
                     if world.task_completed() or self.cost_tracker.exceeded():
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
-                        if original_failures - len(test_tracker.failures) > 0: # can loosen this 
+                        print(original_failures, " ", len(test_tracker.failures))
+                        if original_failures - len(test_tracker.failures) >= 0: # can loosen this 
                             # successfull train sample 
                             num_flips += 1 
-                            breakpoint()
+                            if best_self_edit is None:
+                                best_self_edit = refl_out 
+                                max_diff = original_failures - len(test_tracker.failures) 
+                            elif original_failures - len(test_tracker.failures) > max_diff:
+                                best_self_edit = refl_out
+                            max_diff = max(max_diff, original_failures - len(test_tracker.failures))
                             refl_buffer.append(SFTExample(prompt=refl_prompt, completion=refl_out))
                         break
 
@@ -337,7 +346,7 @@ class SimplifiedReActStarAgent(StarAgent):
                 )
             refl_buffer.clear()
             self._save_state()
-        return num_flips 
+        return num_flips, best_self_edit  
 
     def _save_state(self) -> None:
         os.makedirs(self.trained_checkpoints, exist_ok=True)
@@ -359,11 +368,23 @@ class SimplifiedReActStarAgent(StarAgent):
         else:
             prompt_template = self.reflector_prompt
 
+        if self.test_report is None or len(self.test_report) < 4096: 
+            final_test_report = self.test_report 
+        else:
+            # summarize this test report 
+            filled_summarize_prompt = self.summarize_test_report_prompt.replace("{{test_report}}", self.test_report) 
+            messages = [{"role": "user", "content": filled_summarize_prompt}]
+            output = self.reflector_model.generate(messages, max_new_tokens=4096)
+            #match = re.search(r'(?s)assistant\s*\n(.*)', output)
+            #summarized_test_report = match.group(1) if match else None
+            #final_test_report = summarized_test_report if summarized_test_report is not None else self.test_report 
+            final_test_report = output 
+
         ### needs to be changed to for 1B/3B smaller reflector model 
         filled_prompt = (
              prompt_template
             .replace("{{ground_truth_code}}", self.world_gt_code or "")
-            .replace("{{failed_test_summary}}", self.test_report or "")
+            .replace("{{failed_test_summary}}", final_test_report or "")
             .replace("{{generated_code}}", "See full conversation history below")
             .replace("{{generated_rationale}}", "See full conversation history below")
             .replace("{{spec_or_api_docs}}", "See full conversation history below")
@@ -387,31 +408,17 @@ class SimplifiedReActStarAgent(StarAgent):
         filled_prompt += conversation_history
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
-        #match = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
-        #reasoning_text = match.group(1) if match else None
-        '''
-        fenced = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", output)
-        if fenced:
-            reasoning_text = fenced.group(1).strip()
-        else:
-            match = re.search(r'(\{[\s\S]*\})\s*$', output)
-            if match:
-                text = match.group(1)
-                # normalize double braces
-                if text.startswith("{{") and text.endswith("}}"):
-                    reasoning_text = text[1:-1]
-            else: reasoning_text = None
-        '''
-        matches = re.findall(r'\{\{[\s\S]*?\}\}|\{[\s\S]*?\}', output)
+        reasoning_text = output 
 
-        if not matches:
-            reasoning_text = None
-        else:
-            text = matches[-1]
-            # normalize {{ ... }} -> { ... }
-            if text.startswith("{{") and text.endswith("}}"):
-                text = text[1:-1]
-            reasoning_text = text.strip()
+        #matches = re.findall(r'\{\{[\s\S]*?\}\}|\{[\s\S]*?\}', output)
+        #if not matches:
+        #    reasoning_text = None
+        #else:
+        #    text = matches[-1]
+        #    # normalize {{ ... }} -> { ... }
+        #    if text.startswith("{{") and text.endswith("}}"):
+        #        text = text[1:-1]
+        #    reasoning_text = text.strip()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
