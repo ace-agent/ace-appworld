@@ -152,7 +152,7 @@ class StarAgent(FromDict):
                             # call restem 
                             print("test errors")
                             curr_flips, best_self_edit = self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
-                            #self.curator_call() -> check again 
+                            self.playbook = self.curator_call(best_self_edit, self.playbook)
                             #reasoning_text = self.reflector_call()
                         else:
                             task_success = True

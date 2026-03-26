@@ -39,7 +39,7 @@ class SimplifiedReActStarAgent(StarAgent):
         self.curator_prompt = read_file(curator_prompt_file_path.replace("/", os.sep))
         self.trained_playbook_file_path = trained_playbook_file_path
         self.trained_checkpoints = trained_checkpoints
-        self.num_candidates = 16
+        self.num_candidates = 1 #16
         self.max_prompt_length = max_prompt_length
         self.max_output_length = max_output_length
         self.ignore_multiple_calls = ignore_multiple_calls
@@ -318,7 +318,7 @@ class SimplifiedReActStarAgent(StarAgent):
                     if world.task_completed() or self.cost_tracker.exceeded():
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
                         print(original_failures, " ", len(test_tracker.failures))
-                        if original_failures - len(test_tracker.failures) >= 0: # can loosen this 
+                        if True: #original_failures - len(test_tracker.failures) >= 0: # can loosen this 
                             # successfull train sample 
                             num_flips += 1 
                             if best_self_edit is None:
@@ -336,7 +336,7 @@ class SimplifiedReActStarAgent(StarAgent):
                     model=self.reflector_model.model,
                     tokenizer=self.reflector_model.tokenizer,
                     examples=refl_buffer,
-                    output_dir=os.path.join(self.trained_checkpoints, "reflector_sft"),
+                    output_dir=os.path.join(self.trained_checkpoints, "reflector_lora"),
                     max_seq_len=self.refl_cfg["sft_max_seq_len"],
                     microbatch_size=self.refl_cfg["sft_microbatch_size"],
                     grad_accum_steps=self.refl_cfg["sft_grad_accum_steps"],
@@ -409,7 +409,6 @@ class SimplifiedReActStarAgent(StarAgent):
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
         reasoning_text = output 
-
         #matches = re.findall(r'\{\{[\s\S]*?\}\}|\{[\s\S]*?\}', output)
         #if not matches:
         #    reasoning_text = None

@@ -30,9 +30,9 @@ class SFTDataset(Dataset):
 
         enc_full = self.tok(
             full,
-            truncation=True,
-            max_length=self.max_seq_len,
-            padding=False,
+            #truncation=True,
+            #max_length=self.max_seq_len,
+            #padding=False,
             return_tensors="pt",
         )
         input_ids = enc_full["input_ids"][0]
@@ -41,15 +41,14 @@ class SFTDataset(Dataset):
         # Mask prompt tokens in labels (train only on completion)
         enc_prompt = self.tok(
             ex.prompt,
-            truncation=True,
-            max_length=self.max_seq_len,
-            padding=False,
+            #truncation=True,
+            #max_length=self.max_seq_len,
+            #padding=False,
             return_tensors="pt",
         )
         prompt_len = enc_prompt["input_ids"].shape[1]
         labels = input_ids.clone()
         labels[:prompt_len] = -100
-
         return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
 
@@ -69,19 +68,22 @@ def sft_update(
         return
 
     ds = SFTDataset(tokenizer, examples, max_seq_len=max_seq_len)
-
     args = TrainingArguments(
         output_dir=output_dir,
         per_device_train_batch_size=microbatch_size,
         gradient_accumulation_steps=grad_accum_steps,
         learning_rate=lr,
         num_train_epochs=epochs,
-        logging_steps=10,
-        save_strategy="no",
         report_to=[],
         remove_unused_columns=False,
         bf16=bf16 and torch.cuda.is_available(),
         fp16=(not bf16) and torch.cuda.is_available(),
+        logging_strategy="steps",
+        logging_steps=1,
+        logging_first_step=True,
+        save_strategy="steps",
+        save_steps=1,
+
     )
 
     model.train()
