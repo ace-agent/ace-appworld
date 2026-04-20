@@ -91,16 +91,18 @@ class HFPolicy:
         #stop_ids = self.tokenizer.encode(stop_str, add_special_tokens=False)
         #stopping = StoppingCriteriaList([StopOnSubsequence(stop_ids)])
 
-        out = self.model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=(temperature is not None and temperature > 0),
-            temperature=0.0, 
-            top_p=float(top_p),
-            pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
-            #stopping_criteria=stopping,
-        )
+        gen_model = self.model.module if hasattr(self.model, "module") else self.model
+        with torch.no_grad():
+            out = gen_model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=(temperature is not None and temperature > 0),
+                temperature=0.0, 
+                top_p=float(top_p),
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+                #stopping_criteria=stopping,
+            )
         text = self.tokenizer.decode(out[0], skip_special_tokens=True)
         generated_ids = out[0][input_ids.shape[1]:]
         text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)

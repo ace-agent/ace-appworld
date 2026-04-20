@@ -39,7 +39,7 @@ class SimplifiedReActStarAgent(StarAgent):
         self.curator_prompt = read_file(curator_prompt_file_path.replace("/", os.sep))
         self.trained_playbook_file_path = trained_playbook_file_path
         self.trained_checkpoints = trained_checkpoints
-        self.num_candidates = 1 #16
+        self.num_candidates = 16
         self.max_prompt_length = max_prompt_length
         self.max_output_length = max_output_length
         self.ignore_multiple_calls = ignore_multiple_calls
@@ -265,7 +265,7 @@ class SimplifiedReActStarAgent(StarAgent):
         self.messages = self.text_to_messages(output_str)
         self.num_instruction_messages = len(self.messages)
         
-    def restem_trainer(self, task_id, experiment_name, world, original_failures=None):
+    def restem_trainer(self, task_id, experiment_name, world, original_failures=None, trainer=None):
         playbook = self.playbook
         num_flips = 0 
         refl_buffer: List[SFTExample] = []
@@ -318,7 +318,7 @@ class SimplifiedReActStarAgent(StarAgent):
                     if world.task_completed() or self.cost_tracker.exceeded():
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
                         print(original_failures, " ", len(test_tracker.failures))
-                        if True: #original_failures - len(test_tracker.failures) >= 0: # can loosen this 
+                        if original_failures - len(test_tracker.failures) >= 0: # can loosen this 
                             # successfull train sample 
                             num_flips += 1 
                             if best_self_edit is None:
@@ -332,6 +332,8 @@ class SimplifiedReActStarAgent(StarAgent):
 
         if refl_buffer:
             print("updating reflector")
+            sft_update(trainer, self.reflector_model.tokenizer, refl_buffer, self.refl_cfg["sft_max_seq_len"], task_id)
+            '''
             sft_update(
                     model=self.reflector_model.model,
                     tokenizer=self.reflector_model.tokenizer,
@@ -344,6 +346,7 @@ class SimplifiedReActStarAgent(StarAgent):
                     epochs=self.refl_cfg["sft_epochs"],
                     bf16=self.refl_cfg["bf16"],
                 )
+            '''
             refl_buffer.clear()
             self._save_state()
         return num_flips, best_self_edit  

@@ -12,11 +12,22 @@ from appworld_experiments.code.ace.logger import Logger
 
 from appworld.evaluator import evaluate_task
 from appworld_experiments.code.ace.hf_policy import HFPolicy
+#from appworld.experiments.code.ace.sft import build_sft_trainer
+from .sft import build_sft_trainer
+import torch 
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 @dataclass
 class ExecutionIO:
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+def setup_ddp():
+    dist.init_process_group("nccl")
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    return local_rank
 
 class StarAgent(FromDict):
     def __init__(
@@ -46,6 +57,9 @@ class StarAgent(FromDict):
               lora_dropout=refl_cfg["lora_dropout"],
               lora_target_modules=refl_cfg["lora_target_modules"],
         )
+        #local_rank = setup_ddp()
+        #self.reflector_model.model = self.reflector_model.model.to(local_rank)
+        #self.reflector_model.model = DDP(self.reflector_model.model, device_ids=[local_rank], output_device=local_rank)
         self.messages: list[dict] = []
         self.max_steps = max_steps
         self.step_number = 0
@@ -68,10 +82,21 @@ class StarAgent(FromDict):
         self.playbook = ''
         self.current_task_index = 0  # Global variable to track current task index
         self.trained_playbook_file_path = None
-        self.trained_checkpoints = None 
+        self.trained_checkpoints = refl_cfg["trained_checkpoints"] 
         self.num_retries = 1
         self.use_gt_code = use_gt_code
         self.refl_cfg = refl_cfg 
+
+        self.trainer = build_sft_trainer(
+                     model=self.reflector_model.model,
+                     tokenizer=self.reflector_model.tokenizer,
+                     output_dir=os.path.join(self.trained_checkpoints, "reflector_lora"),
+                     microbatch_size=self.refl_cfg["sft_microbatch_size"],
+                     grad_accum_steps=self.refl_cfg["sft_grad_accum_steps"],
+                     lr=self.refl_cfg["sft_lr"],
+                     epochs=self.refl_cfg["sft_epochs"],
+                     bf16=self.refl_cfg["bf16"],
+                     )
       
     def initialize(self, world: AppWorld):
         self.world = world
@@ -148,10 +173,10 @@ class StarAgent(FromDict):
                     if world.task_completed() or self.cost_tracker.exceeded():
                         self.playbook = self.curator_call()
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
-                        if len(test_tracker.failures) > 0:
+                        if True: #len(test_tracker.failures) > 0:
                             # call restem 
                             print("test errors")
-                            curr_flips, best_self_edit = self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures))
+                            curr_flips, best_self_edit = self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures), trainer=self.trainer)
                             self.playbook = self.curator_call(best_self_edit, self.playbook)
                             #reasoning_text = self.reflector_call()
                         else:

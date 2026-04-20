@@ -51,7 +51,7 @@ class SFTDataset(Dataset):
         labels[:prompt_len] = -100
         return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
-
+'''
 def sft_update(
     model,
     tokenizer,
@@ -90,3 +90,37 @@ def sft_update(
     trainer = Trainer(model=model, args=args, train_dataset=ds)
     trainer.train()
     model.eval()
+'''
+
+from transformers import Trainer, TrainingArguments, DataCollatorWithPadding
+
+def build_sft_trainer(
+    model, tokenizer, output_dir, microbatch_size, grad_accum_steps, lr, epochs, bf16
+):
+    args = TrainingArguments(
+        output_dir=output_dir,
+        per_device_train_batch_size=microbatch_size,
+        gradient_accumulation_steps=grad_accum_steps,
+        learning_rate=lr,
+        num_train_epochs=epochs,
+        report_to=[],
+        remove_unused_columns=False,
+        bf16=bf16 and torch.cuda.is_available(),
+        fp16=(not bf16) and torch.cuda.is_available(),
+        logging_strategy="steps",
+        logging_steps=1,
+        logging_first_step=True,
+        save_strategy="no",
+        save_steps=1,
+        gradient_checkpointing=True,
+    )
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, return_tensors="pt")
+    return Trainer(model=model, args=args, data_collator=collator)
+
+def sft_update(trainer, tokenizer, examples, max_seq_len, task_id):
+    if not examples:
+        return
+    trainer.train_dataset = SFTDataset(tokenizer, examples, max_seq_len=max_seq_len)
+    trainer.model.train()
+    trainer.train()
+    trainer.model.eval()
