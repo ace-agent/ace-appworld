@@ -51,7 +51,6 @@ class HFPolicy:
             torch_dtype=dtype,
             device_map="auto" if self.device.startswith("cuda") and torch.cuda.is_available() else None,
         )
-
         if self.trainable_lora:
             if LoraConfig is None or get_peft_model is None:
                 raise ImportError("peft is required for trainable_lora=True. Install peft.")
@@ -76,20 +75,10 @@ class HFPolicy:
         temperature: float = 0.0,
         top_p: float = 1.0,
     ) -> str:
-        #messages = [
-        #    {"role": "user", "content": prompt}
-        #]
-
-        #inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        
         inputs = self.tokenizer.apply_chat_template(prompt, tokenize=True, add_generation_prompt=True,  return_tensors="pt")
         device = next(self.model.parameters()).device
         inputs = {k: v.to(device) for k, v in inputs.items()}
         input_ids = inputs["input_ids"]
-
-        #stop_str = "</json>"
-        #stop_ids = self.tokenizer.encode(stop_str, add_special_tokens=False)
-        #stopping = StoppingCriteriaList([StopOnSubsequence(stop_ids)])
 
         gen_model = self.model.module if hasattr(self.model, "module") else self.model
         with torch.no_grad():
@@ -101,7 +90,6 @@ class HFPolicy:
                 top_p=float(top_p),
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
-                #stopping_criteria=stopping,
             )
         text = self.tokenizer.decode(out[0], skip_special_tokens=True)
         generated_ids = out[0][input_ids.shape[1]:]

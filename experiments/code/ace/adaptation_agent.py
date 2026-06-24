@@ -45,21 +45,17 @@ class StarAgent(FromDict):
         use_gt_code: bool = False,
     ):
         self.generator_model = LiteLLMGenerator(**generator_model_config)
-        #self.reflector_model = LiteLLMGenerator(**reflector_model_config)
         self.curator_model = LiteLLMGenerator(**curator_model_config)
         refl_cfg = reflector_model_config
         self.reflector_model = HFPolicy(
               refl_cfg["name"],
-              trainable_lora=True,
+              #trainable_lora=True,
               bf16=refl_cfg["bf16"],
               lora_r=refl_cfg["lora_r"],
               lora_alpha=refl_cfg["lora_alpha"],
               lora_dropout=refl_cfg["lora_dropout"],
               lora_target_modules=refl_cfg["lora_target_modules"],
         )
-        #local_rank = setup_ddp()
-        #self.reflector_model.model = self.reflector_model.model.to(local_rank)
-        #self.reflector_model.model = DDP(self.reflector_model.model, device_ids=[local_rank], output_device=local_rank)
         self.messages: list[dict] = []
         self.max_steps = max_steps
         self.step_number = 0
@@ -86,7 +82,7 @@ class StarAgent(FromDict):
         self.num_retries = 1
         self.use_gt_code = use_gt_code
         self.refl_cfg = refl_cfg 
-
+    
         self.trainer = build_sft_trainer(
                      model=self.reflector_model.model,
                      tokenizer=self.reflector_model.tokenizer,
@@ -140,6 +136,7 @@ class StarAgent(FromDict):
                 print("GT Code: \n", gt_code)
                 
                 self.step_number = 0
+                print("check for which playbook is being used")
                 for _ in range(self.max_steps):
                     self.step_number += 1
                     if self.step_number == 1:
@@ -173,7 +170,7 @@ class StarAgent(FromDict):
                     if world.task_completed() or self.cost_tracker.exceeded():
                         self.playbook = self.curator_call()
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
-                        if True: #len(test_tracker.failures) > 0:
+                        if len(test_tracker.failures) > 0:
                             # call restem 
                             print("test errors")
                             curr_flips, best_self_edit = self.restem_trainer(task_id, experiment_name, world, original_failures=len(test_tracker.failures), trainer=self.trainer)

@@ -274,7 +274,6 @@ class SimplifiedReActStarAgent(StarAgent):
         for k in range(self.num_candidates):
             refl_prompt, refl_out = self.reflector_call()
             tmp_playbook = self.curator_call(refl_out, playbook)
-
             print(f"Iteration number: {task_id}___{k}")
             
             # run generator with updated playbook
@@ -314,7 +313,6 @@ class SimplifiedReActStarAgent(StarAgent):
                                     message=output.content,
                                     step_number=self.step_number
                                 )
-
                     if world.task_completed() or self.cost_tracker.exceeded():
                         test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
                         print(original_failures, " ", len(test_tracker.failures))
@@ -378,9 +376,6 @@ class SimplifiedReActStarAgent(StarAgent):
             filled_summarize_prompt = self.summarize_test_report_prompt.replace("{{test_report}}", self.test_report) 
             messages = [{"role": "user", "content": filled_summarize_prompt}]
             output = self.reflector_model.generate(messages, max_new_tokens=4096)
-            #match = re.search(r'(?s)assistant\s*\n(.*)', output)
-            #summarized_test_report = match.group(1) if match else None
-            #final_test_report = summarized_test_report if summarized_test_report is not None else self.test_report 
             final_test_report = output 
 
         ### needs to be changed to for 1B/3B smaller reflector model 
@@ -412,15 +407,6 @@ class SimplifiedReActStarAgent(StarAgent):
         messages = [{"role": "user", "content": filled_prompt}]
         output = self.reflector_model.generate(messages, max_new_tokens=750)
         reasoning_text = output 
-        #matches = re.findall(r'\{\{[\s\S]*?\}\}|\{[\s\S]*?\}', output)
-        #if not matches:
-        #    reasoning_text = None
-        #else:
-        #    text = matches[-1]
-        #    # normalize {{ ... }} -> { ... }
-        #    if text.startswith("{{") and text.endswith("}}"):
-        #        text = text[1:-1]
-        #    reasoning_text = text.strip()
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:

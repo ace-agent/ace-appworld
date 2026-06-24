@@ -35,9 +35,9 @@ local reflector_model_config = {
     "sft_max_seq_len": 2048,
     "sft_microbatch_size": 1,
     "sft_grad_accum_steps": 8,
-    "sft_lr": 2e-4, 
+    "sft_lr": 1e-4, 
     "sft_epochs": 1,
-
+    "trained_checkpoints" : experiment_playbooks_path + "/appworld_offline_trained_with_gt_lora_checkpoints",
     # Misc
     "bf16": true,
     "seed": 42
@@ -82,7 +82,7 @@ local curator_model_config = {
             "summarize_test_prompt_file_path": experiment_prompts_path + "/appworld_summarize_test_report.txt",
             "curator_prompt_file_path": experiment_prompts_path + "/appworld_react_curator_prompt.txt", 
             "initial_playbook_file_path": experiment_playbooks_path + "/appworld_initial_playbook.txt", 
-            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook_ref_qwen_1.5b.txt",  
+            "trained_playbook_file_path": experiment_playbooks_path + "/appworld_offline_trained_with_gt_playbook_ref_qwen_7b_lora_training_lr_1e-4.txt",  
             "trained_checkpoints" : experiment_playbooks_path + "/appworld_offline_trained_with_gt_lora_checkpoints",
             "ignore_multiple_calls": true,
             "max_steps": 40,
