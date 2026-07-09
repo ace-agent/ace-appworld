@@ -522,7 +522,6 @@ def evaluate_task(
         models=models,
         ground_truth_answer=ground_truth.answer,
     )
-
     time_freezer.stop()
     # NOTE: Do NOT reset models_start.to_db_home_path  and models_end_db_home_path_in_memory
     # from CachedDBHandler here as it can casue side effect in an yet open AppWorld.

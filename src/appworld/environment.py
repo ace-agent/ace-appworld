@@ -384,8 +384,29 @@ class AppWorld:
         from appworld.apps.api_lib import unset_local_date_and_time
 
         self._maybe_raise_remote_environment_error("_unset_datetime")
-        self.id_to_time_freezer.pop(self.time_freezer_id, None)
-        unset_local_date_and_time(self.time_freezer)
+        #self.id_to_time_freezer.pop(self.time_freezer_id, None)
+        #unset_local_date_and_time(self.time_freezer)
+        # Grab current state (might be missing if _set_datetime() failed)
+        freezer_id = getattr(self, "time_freezer_id", None)
+        freezer = getattr(self, "time_freezer", None)
+
+        # Remove from map if present (already idempotent)
+        if freezer_id is not None:
+            self.id_to_time_freezer.pop(freezer_id, None)
+
+        # IMPORTANT: prevent double-stop by clearing state first
+        self.time_freezer_id = None
+        self.time_freezer = None
+
+        # If nothing was started, nothing to stop
+        if freezer is None:
+            return
+
+        # freezegun can throw IndexError if stop is called out-of-order / twice
+        try:
+            unset_local_date_and_time(freezer)
+        except IndexError:
+            pass
 
     def _execute_preamble(self) -> None:
         self._maybe_raise_remote_environment_error("_execute_preamble")

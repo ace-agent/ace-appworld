@@ -87,7 +87,7 @@ class Task:
         include_api_response_schemas: bool = True,
     ) -> Self:
         from appworld.apps.admin.models import MainUserMunch
-
+        print("in load ", task_id)
         task_directory = os.path.join(path_store.data, "tasks", task_id)
 
         if not os.path.exists(task_directory):
@@ -98,6 +98,8 @@ class Task:
             raise Exception(f"The task specs file path ({specs_path}) doesn't exist.")
 
         task_specs = read_json(specs_path)
+        
+        print("task specs ", task_specs)
 
         _ = task_specs.pop("canary_string", None)
         db_version = task_specs.pop("db_version")
@@ -132,13 +134,12 @@ class Task:
             db_version=db_version,
             include_api_response_schemas=include_api_response_schemas,
         )
-
         if load_ground_truth:
             task.ground_truth = GroundTruth.load(
                 task_id=task_id,
                 mode=ground_truth_mode,
             )
-
+        print(task)
         return task  # type: ignore
 
     def save(

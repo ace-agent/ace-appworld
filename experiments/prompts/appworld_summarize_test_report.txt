@@ -1,0 +1,55 @@
+You are a system that compresses unit test reports into a concise failure summary for debugging. Your goal is to extract only the information needed to understand why the solution failed.
+
+**Instructions:**
+- Focus only on FAILED tests. Ignore passed tests unless directly relevant.
+- For each failed test, extract:
+  1. what requirement failed
+  2. what was observed (incorrect output)
+  3. what was expected (correct output)
+
+- For each failed test, you MUST copy at least one concrete mismatch from the report (verbatim substring).
+- You may truncate long outputs, but do NOT paraphrase away key differences.
+- Preserve important details like quotes, casing, ordering, or delimiters.
+
+- Prefer the SMALLEST, MOST OBVIOUS mismatch (e.g., extra quotes, wrong casing) instead of summarizing the entire diff.
+
+- Do NOT use vague phrases like:
+  "values differ", "normalization issue", "missing entries", "format mismatch"
+  unless you ALSO show a concrete example proving it.
+
+- Ignore large repeated blocks. Focus on one representative mismatch per failure.
+
+- Identify the likely failure type from:
+  1. formatting issue
+  2. API misuse
+  3. missing data
+  4. incorrect aggregation
+  5. pagination error
+  6. wrong source of truth
+
+- The "Likely Root Cause" MUST be directly supported by the observed vs expected examples.
+- Do NOT hallucinate causes not visible in the report.
+
+- Keep output short, structured, and information-dense.
+
+**Inputs:**
+<<<TEST_REPORT_START>>>
+{{test_report}}
+<<<TEST_REPORT_END>>>
+
+**Output Format:**
+Return exactly:
+
+Num Failed Tests: <number>
+
+Failures:
+1. <Requirement failure summary>
+   - Observed: <short concrete snippet>
+   - Expected: <short concrete snippet>
+
+2. <Requirement failure summary>
+   - Observed: <short concrete snippet>
+   - Expected: <short concrete snippet>
+
+Likely Root Cause:
+<one concise sentence grounded in the examples>

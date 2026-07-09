@@ -10,16 +10,21 @@ from appworld import AppWorld
 from appworld.common.utils import read_file
 from appworld_experiments.code.ace.adaptation_agent import StarAgent, ExecutionIO
 from .playbook import apply_curator_operations, extract_json_from_text, get_next_global_id
+from appworld.evaluator import evaluate_task
+from .sft import SFTExample, sft_update
 
 @StarAgent.register("ace_adaptation_react")
 class SimplifiedReActStarAgent(StarAgent):
     def __init__(
         self,
         generator_prompt_file_path: str | None = None,
-        reflector_prompt_file_path: str | None = None,
+        main_reflector_prompt_file_path: str | None = None,
+        supplement_reflector_prompt_file_path: str | None = None, 
+        summarize_test_prompt_file_path: str | None = None, 
         curator_prompt_file_path: str | None = None,
         initial_playbook_file_path: str | None = None,
         trained_playbook_file_path: str | None = None,
+        trained_checkpoints: str | None = None,
         ignore_multiple_calls: bool = True,
         max_prompt_length: int | None = None,
         max_output_length: int = 400000,
@@ -27,10 +32,14 @@ class SimplifiedReActStarAgent(StarAgent):
     ):
         super().__init__(**kwargs)
         self.generator_prompt_template = read_file(generator_prompt_file_path.replace("/", os.sep)).lstrip()
-        self.reflector_prompt = read_file(reflector_prompt_file_path.replace("/", os.sep))
+        self.reflector_prompt = read_file(main_reflector_prompt_file_path.replace("/", os.sep))
+        self.reflector_prompt_test_report = read_file(supplement_reflector_prompt_file_path.replace("/", os.sep))
+        self.summarize_test_report_prompt = read_file(summarize_test_prompt_file_path.replace("/", os.sep))
         self.curator_prompt_file_path = curator_prompt_file_path
         self.curator_prompt = read_file(curator_prompt_file_path.replace("/", os.sep))
         self.trained_playbook_file_path = trained_playbook_file_path
+        self.trained_checkpoints = trained_checkpoints
+        self.num_candidates = 16
         self.max_prompt_length = max_prompt_length
         self.max_output_length = max_output_length
         self.ignore_multiple_calls = ignore_multiple_calls
@@ -45,20 +54,24 @@ class SimplifiedReActStarAgent(StarAgent):
         
         self.next_global_id = get_next_global_id(self.playbook)
 
-    def initialize(self, world: AppWorld):
+    def initialize(self, world: AppWorld, playbook: str = None):
         super().initialize(world)
         template = Template(self.generator_prompt_template)
         app_descriptions = json.dumps(
             [{"name": k, "description": v} for (k, v) in world.task.app_descriptions.items()],
             indent=1,
         )
+        
+        playbook = self.playbook if playbook is None else playbook
+
         template_params = {
             "input_str": world.task.instruction,
             "main_user": world.task.supervisor,
             "app_descriptions": app_descriptions,
             "relevant_apis": str(world.task.ground_truth.required_apis),
-            "playbook": self.playbook,
+            "playbook": playbook,
         }
+
         output_str = template.render(template_params)
         output_str = self.truncate_input(output_str) + "\n\n"
         self.messages = self.text_to_messages(output_str)
@@ -232,14 +245,144 @@ class SimplifiedReActStarAgent(StarAgent):
         messages = pre_messages + post_messages
         return messages
     
+    def tweak_world_playbook(self, world: AppWorld, playbook: str):
+        template = Template(self.generator_prompt_template)
+        app_descriptions = json.dumps(
+            [{"name": k, "description": v} for (k, v) in world.task.app_descriptions.items()],
+            indent=1,
+        )
+
+        template_params = {
+            "input_str": world.task.instruction,
+            "main_user": world.task.supervisor,
+            "app_descriptions": app_descriptions,
+            "relevant_apis": str(world.task.ground_truth.required_apis),
+            "playbook": playbook,
+        }
+
+        output_str = template.render(template_params)
+        output_str = self.truncate_input(output_str) + "\n\n"
+        self.messages = self.text_to_messages(output_str)
+        self.num_instruction_messages = len(self.messages)
+        
+    def restem_trainer(self, task_id, experiment_name, world, original_failures=None, trainer=None):
+        playbook = self.playbook
+        num_flips = 0 
+        refl_buffer: List[SFTExample] = []
+        best_self_edit = None 
+        max_diff = 0 
+        for k in range(self.num_candidates):
+            refl_prompt, refl_out = self.reflector_call()
+            tmp_playbook = self.curator_call(refl_out, playbook)
+            print(f"Iteration number: {task_id}___{k}")
+            
+            # run generator with updated playbook
+            reasoning_text = ""
+            
+            with AppWorld(
+                task_id=task_id, experiment_name=experiment_name, **self.appworld_config
+                ) as world:
+                execution_outputs: list[ExecutionIO] = []
+                self.tweak_world_playbook(world, tmp_playbook)
+
+                try:
+                    gt_code = world.task.ground_truth.load(task_id, mode="full").compiled_solution_code
+                except:
+                    raise ValueError(f"GT code not found for task: {task_id}")
+
+                for i in range(self.max_steps):
+                    self.step_number += 1 
+                    execution_inputs, cost, reflection = self.next_execution_inputs_and_cost(execution_outputs, gt_code, reasoning_text)
+                    if reflection:
+                        reflections.append(reflection)
+
+                    if len(execution_inputs) != 0:
+                        execution_outputs = [
+                            ExecutionIO(
+                                content=world.execute(execution_input.content),
+                                metadata=execution_input.metadata,
+                            )
+                            for execution_input in execution_inputs
+                        ]
+
+                        # Show execution results to user via logger
+                        for i, output in enumerate(execution_outputs):
+                            if output.content.strip():  # Only show non-empty outputs
+                                self.logger.show_message(
+                                    role="environment",
+                                    message=output.content,
+                                    step_number=self.step_number
+                                )
+                    if world.task_completed() or self.cost_tracker.exceeded():
+                        test_tracker, self.test_report = evaluate_task(task_id, experiment_name)
+                        print(original_failures, " ", len(test_tracker.failures))
+                        if original_failures - len(test_tracker.failures) >= 0: # can loosen this 
+                            # successfull train sample 
+                            num_flips += 1 
+                            if best_self_edit is None:
+                                best_self_edit = refl_out 
+                                max_diff = original_failures - len(test_tracker.failures) 
+                            elif original_failures - len(test_tracker.failures) > max_diff:
+                                best_self_edit = refl_out
+                            max_diff = max(max_diff, original_failures - len(test_tracker.failures))
+                            refl_buffer.append(SFTExample(prompt=refl_prompt, completion=refl_out))
+                        break
+
+        if refl_buffer:
+            print("updating reflector")
+            sft_update(trainer, self.reflector_model.tokenizer, refl_buffer, self.refl_cfg["sft_max_seq_len"], task_id)
+            '''
+            sft_update(
+                    model=self.reflector_model.model,
+                    tokenizer=self.reflector_model.tokenizer,
+                    examples=refl_buffer,
+                    output_dir=os.path.join(self.trained_checkpoints, "reflector_lora"),
+                    max_seq_len=self.refl_cfg["sft_max_seq_len"],
+                    microbatch_size=self.refl_cfg["sft_microbatch_size"],
+                    grad_accum_steps=self.refl_cfg["sft_grad_accum_steps"],
+                    lr=self.refl_cfg["sft_lr"],
+                    epochs=self.refl_cfg["sft_epochs"],
+                    bf16=self.refl_cfg["bf16"],
+                )
+            '''
+            refl_buffer.clear()
+            self._save_state()
+        return num_flips, best_self_edit  
+
+    def _save_state(self) -> None:
+        os.makedirs(self.trained_checkpoints, exist_ok=True)
+
+        # Save LoRA adapters if present
+        try:
+            self.reflector_model.model.save_pretrained(os.path.join(self.trained_checkpoints, "reflector_lora"))
+        except Exception:
+            pass
+
+
     def reflector_call(self):
         """
         Let the reflector generate insights based on the full conversation history, i.e. all messages and ground truths (if any).
         """
+
+        if self.test_report is not None:
+            prompt_template = self.reflector_prompt_test_report
+        else:
+            prompt_template = self.reflector_prompt
+
+        if self.test_report is None or len(self.test_report) < 4096: 
+            final_test_report = self.test_report 
+        else:
+            # summarize this test report 
+            filled_summarize_prompt = self.summarize_test_report_prompt.replace("{{test_report}}", self.test_report) 
+            messages = [{"role": "user", "content": filled_summarize_prompt}]
+            output = self.reflector_model.generate(messages, max_new_tokens=4096)
+            final_test_report = output 
+
+        ### needs to be changed to for 1B/3B smaller reflector model 
         filled_prompt = (
-            self.reflector_prompt
+             prompt_template
             .replace("{{ground_truth_code}}", self.world_gt_code or "")
-            .replace("{{test_report}}", self.test_report or "")
+            .replace("{{failed_test_summary}}", final_test_report or "")
             .replace("{{generated_code}}", "See full conversation history below")
             .replace("{{generated_rationale}}", "See full conversation history below")
             .replace("{{spec_or_api_docs}}", "See full conversation history below")
@@ -250,32 +393,38 @@ class SimplifiedReActStarAgent(StarAgent):
         
         # add full conversation history
         conversation_history = "\n\n=== FULL CONVERSATION HISTORY ===\n"
-        for i, msg in enumerate(self.trimmed_messages):
+        trimmed_messages = self.trimmed_messages[:1]#[:19]
+        post_messages = self.trimmed_messages[self.num_instruction_messages - 1 :]
+        last_message = trimmed_messages[-1]['content']
+        #last_message = last_message[:last_message.index("USER")]
+        trimmed_messages[-1]['content'] = last_message
+        trimmed_messages = trimmed_messages + post_messages
+        for i, msg in enumerate(trimmed_messages):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
             conversation_history += f"[{i}] {role.upper()}: {content}\n\n"
-        
         filled_prompt += conversation_history
-
-        message_ = self.reflector_model.generate(messages=[{"role": "user", "content": filled_prompt}])
-        reasoning_text = message_.get("content", "")
+        messages = [{"role": "user", "content": filled_prompt}]
+        output = self.reflector_model.generate(messages, max_new_tokens=750)
+        reasoning_text = output 
         if reasoning_text != "" and reasoning_text is not None:
             self.logger.show_message(role="user", message=reasoning_text, step_number=self.step_number)
         else:
             self.logger.show_message(role="user", message="[WARN] reasoning_text is empty or None", step_number=self.step_number)
-
-        return reasoning_text
+        return filled_prompt, reasoning_text
     
-    def curator_call(self):
+    def curator_call(self, reasoning_text: str = None, playbook: str = None):
         """
         Let the curator update the playbook based on the full conversation history, i.e. all messages and reflections.
         """
-        
-        reasoning_text = None
-        if self.use_reflector:
-            reasoning_text = self.reflector_call()
+        if self.use_reflector and reasoning_text is None:
+            _, reasoning_text = self.reflector_call()
         # Current playbook and question context
-        current_playbook = self.playbook or ""
+        if playbook is not None:
+            current_playbook = playbook 
+        else:
+            current_playbook = self.playbook or ""
+
         question_context = getattr(getattr(self, "world", None), "task", None)
         question_context = getattr(question_context, "instruction", "") if question_context else ""
 
@@ -291,7 +440,8 @@ class SimplifiedReActStarAgent(StarAgent):
             initial_generated_code="See full conversation history below",
             final_generated_code="See full conversation history below",
             guidebook=reasoning_text,
-            current_playbook=self.playbook,
+            #current_playbook=self.playbook,
+            current_playbook=current_playbook, 
             question_context=question_context,
             gt=self.world_gt_code
         )
@@ -354,8 +504,11 @@ class SimplifiedReActStarAgent(StarAgent):
             operations = filtered_ops
             print(f"✅ Curator JSON schema validated successfully: {len(operations)} operations")
             # Apply curated updates
-            self.playbook, self.next_global_id = apply_curator_operations(
-                self.playbook, operations, self.next_global_id
+            #self.playbook, self.next_global_id = apply_curator_operations(
+            #    self.playbook, operations, self.next_global_id
+            #)
+            current_playbook, self.next_global_id = apply_curator_operations(
+                current_playbook, operations, self.next_global_id
             )
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
             print(f"❌ Curator JSON parsing failed: {e}")
@@ -377,9 +530,11 @@ class SimplifiedReActStarAgent(StarAgent):
 
         # Persist updated playbook
         with open(self.trained_playbook_file_path, "w") as file:
-            file.write(self.playbook)
+            file.write(current_playbook)
 
         if curator_response is not None:
             self.logger.show_message(role="user", message=curator_response, step_number=self.step_number)
         else:
             self.logger.show_message(role="user", message="[WARN] curator_response is None", step_number=self.step_number)
+
+        return current_playbook 
