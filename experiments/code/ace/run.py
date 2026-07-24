@@ -22,13 +22,23 @@ def run_experiment(
     sample_size = runner_config.pop("sample_size", None)
     custom_task_ids = runner_config.pop("task_ids", None)
     num_epochs = runner_config.pop("num_epochs", 1)
-    # batch_size, curator_batch_size, augmented_shuffling (ace / ACEBatch parity)
+    # batch_size, curator_batch_size, curator_parallel, augmented_shuffling (ace / ACEBatch parity)
     config_batch_size = runner_config.pop("batch_size", None)
     if config_batch_size is not None:
         batch_size = int(config_batch_size)
     curator_batch_size = runner_config.pop("curator_batch_size", None)
     if curator_batch_size is not None:
         curator_batch_size = int(curator_batch_size)
+    curator_parallel = bool(runner_config.pop("curator_parallel", True))
+    curator_max_workers = runner_config.pop("curator_max_workers", None)
+    if curator_max_workers is not None:
+        curator_max_workers = int(curator_max_workers)
+    use_bulletpoint_analyzer = bool(
+        runner_config.pop("use_bulletpoint_analyzer", False)
+    )
+    bulletpoint_analyzer_threshold = float(
+        runner_config.pop("bulletpoint_analyzer_threshold", 0.90)
+    )
     augmented_shuffling = runner_config.pop("augmented_shuffling", True)
     augmented_shuffling_factor = runner_config.pop("augmented_shuffling_factor", None)
 
@@ -71,6 +81,14 @@ def run_experiment(
             agent_config = dict(agent_config, type="ace_adaptation_react_parallel")
             if curator_batch_size is not None:
                 agent_config = dict(agent_config, curator_batch_size=curator_batch_size)
+            agent_config = dict(agent_config, curator_parallel=curator_parallel)
+            if curator_max_workers is not None:
+                agent_config = dict(agent_config, curator_max_workers=curator_max_workers)
+            agent_config = dict(
+                agent_config,
+                use_bulletpoint_analyzer=use_bulletpoint_analyzer,
+                bulletpoint_analyzer_threshold=bulletpoint_analyzer_threshold,
+            )
             if not augmented_shuffling:
                 aug_f = 1
             elif augmented_shuffling_factor is not None:

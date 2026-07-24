@@ -41,6 +41,7 @@ from appworld_experiments.code.ace.adaptation_agent import StarAgent, ExecutionI
 from appworld_experiments.code.ace.adaptation_react import SimplifiedReActStarAgent
 from appworld_experiments.code.ace.cost_tracker import CostTracker
 from appworld_experiments.code.ace.logger import Logger
+from .bulletpoint_analyzer import BulletpointAnalyzer, DEDUP_AVAILABLE
 from .playbook import apply_curator_operations, extract_json_from_text
 from .utils_compat import count_tokens, is_context_length_api_exception
 
@@ -418,9 +419,14 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
             talking to a dedicated remote AppWorld server.
          c. After all B threads finish, collect ``BatchTaskResult``s.
          d. Chunk reflections by curator_batch_size (default: same as batch_size).
-         e. For each chunk: combine reflections and run curator once; all chunk
-            curator LLM calls run in parallel (same playbook snapshot), then
-            operations are applied in chunk order.
+         e. For each chunk: combine reflections and run curator once.
+            - curator_parallel=True (default): all chunk curator LLM calls run
+              against a frozen playbook snapshot, then ADD ops are merged and
+              applied once (ace_batch curator_parallel parity).
+            - curator_parallel=False: serial curator; each chunk updates the
+              live playbook so later chunks see earlier ADDs.
+            - Optional use_bulletpoint_analyzer: after applying curator ops,
+              embedding+LLM-merge similar playbook bullets.
       3. Stop all server subprocesses on exit.
 
     Falls back to the sequential parent when batch_size <= 1.
@@ -430,14 +436,46 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
         self,
         curator_batch_size: int | None = None,
         augmented_shuffling_factor: int = 1,
+        curator_parallel: bool = True,
+        curator_max_workers: int | None = None,
+        use_bulletpoint_analyzer: bool = False,
+        bulletpoint_analyzer_threshold: float = 0.90,
         **kwargs: Any,
     ):
         # Store the raw init kwargs so we can recreate agents in worker threads
         kwargs = dict(kwargs)
         self.curator_batch_size = kwargs.pop("curator_batch_size", curator_batch_size)
-        self.augmented_shuffling_factor = kwargs.pop("augmented_shuffling_factor", augmented_shuffling_factor)
+        self.augmented_shuffling_factor = kwargs.pop(
+            "augmented_shuffling_factor", augmented_shuffling_factor
+        )
+        self.curator_parallel = bool(
+            kwargs.pop("curator_parallel", curator_parallel)
+        )
+        max_workers = kwargs.pop("curator_max_workers", curator_max_workers)
+        self.curator_max_workers = int(max_workers) if max_workers is not None else None
+        self.use_bulletpoint_analyzer = bool(
+            kwargs.pop("use_bulletpoint_analyzer", use_bulletpoint_analyzer)
+        )
+        self.bulletpoint_analyzer_threshold = float(
+            kwargs.pop(
+                "bulletpoint_analyzer_threshold", bulletpoint_analyzer_threshold
+            )
+        )
         self._init_kwargs = dict(kwargs)
         super().__init__(**kwargs)
+        self.bulletpoint_analyzer: BulletpointAnalyzer | None = None
+        if self.use_bulletpoint_analyzer:
+            if DEDUP_AVAILABLE:
+                self.bulletpoint_analyzer = BulletpointAnalyzer(self.curator_model)
+                print(
+                    f"✓ BulletpointAnalyzer initialized "
+                    f"(threshold={self.bulletpoint_analyzer_threshold})"
+                )
+            else:
+                print(
+                    "⚠️  use_bulletpoint_analyzer=True but sentence-transformers/faiss "
+                    "unavailable; LLM playbook merge disabled"
+                )
 
     def solve_tasks(
         self,
@@ -474,9 +512,28 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
             process_index=process_index,
         )
 
+        if self.log_lm_calls:
+            phase2_lm_path = os.path.join(
+                path_store.experiment_outputs,
+                experiment_name,
+                "phase2_llm_logs",
+                "lm_calls.jsonl",
+            )
+            os.makedirs(os.path.dirname(phase2_lm_path), exist_ok=True)
+            self.reflector_model.log_calls_to(file_path=phase2_lm_path)
+            self.curator_model.log_calls_to(file_path=phase2_lm_path)
+
         total_batches = (len(task_ids) + batch_size - 1) // batch_size
         _cbs = self.curator_batch_size if self.curator_batch_size is not None else batch_size
-        print(f"Gen batch size: {batch_size} | Curator batch size: {_cbs} (None -> same as gen batch)")
+        _workers = (
+            f", max_workers={self.curator_max_workers}"
+            if self.curator_parallel and self.curator_max_workers is not None
+            else ""
+        )
+        print(
+            f"Gen batch size: {batch_size} | Curator batch size: {_cbs} "
+            f"(None -> same as gen batch) | curator_parallel={self.curator_parallel}{_workers}"
+        )
 
         # ── Start decoupled AppWorld environment servers ──────────────
         print(f"\nStarting {batch_size} remote AppWorld environment servers...")
@@ -565,10 +622,29 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
             print("  Servers stopped")
 
     # ──────────────────────────────────────────────────────────────────
-    #  Batch curation (curator LLM calls may run in parallel threads)
-    #  Chunk reflections by curator_batch_size; each chunk's curator call
-    #  uses the same playbook snapshot, then ops are applied in chunk order.
+    #  Batch curation
+    #  Chunk reflections by curator_batch_size.
+    #  Serial: each chunk curator updates the live playbook.
+    #  Parallel (curator_parallel): snapshot + concurrent chunks + merge ops once.
     # ──────────────────────────────────────────────────────────────────
+
+    def _phase2_maybe_merge_playbook(self) -> None:
+        """Optional embedding + LLM merge of similar bullets (ace_batch parity)."""
+        if not self.use_bulletpoint_analyzer or self.bulletpoint_analyzer is None:
+            return
+        print(
+            f"  Running BulletpointAnalyzer "
+            f"(threshold={self.bulletpoint_analyzer_threshold})..."
+        )
+        try:
+            self.playbook = self.bulletpoint_analyzer.analyze(
+                playbook=self.playbook,
+                threshold=self.bulletpoint_analyzer_threshold,
+                merge=True,
+            )
+        except Exception as e:
+            print(f"  ⚠️  BulletpointAnalyzer failed: {e}; keeping unmerged playbook")
+            traceback.print_exc()
 
     def _phase2_save_playbook(self) -> None:
         if self.trained_playbook_file_path:
@@ -586,7 +662,7 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
     def _batch_curator_call(
         self, batch_results: list[BatchTaskResult], *, generator_batch_size: int
     ) -> None:
-        """Phase 2: chunk by curator_batch_size, parallel curator calls, apply ops in order."""
+        """Phase 2: chunk by curator_batch_size; serial or parallel curator (ace_batch parity)."""
         results_to_curate = [
             r for r in batch_results
             if r.should_curate and r.trimmed_messages
@@ -606,59 +682,130 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
                 f"{orig_count} -> {len(results_to_curate)} after augmentation"
             )
 
-        snapshot_playbook = self.playbook
         curator_batch_size = self.curator_batch_size
         if curator_batch_size is None:
             curator_batch_size = generator_batch_size
         curator_batch_size = max(1, int(curator_batch_size))
         num_chunks = (len(results_to_curate) + curator_batch_size - 1) // curator_batch_size
-        print(
-            f"\nPHASE 2: Aggregation + Curator (curator_batch_size={curator_batch_size})"
-        )
-        print(
-            f"  Running Curator {num_chunks} times in parallel (each with up to "
-            f"{curator_batch_size} samples); applying ops in chunk order"
-        )
 
         chunk_specs: list[tuple[int, int, int, list[BatchTaskResult]]] = []
         for chunk_idx in range(num_chunks):
             start_idx = chunk_idx * curator_batch_size
             end_idx = min(start_idx + curator_batch_size, len(results_to_curate))
-            chunk_specs.append((chunk_idx, start_idx, end_idx, results_to_curate[start_idx:end_idx]))
-
-        def _run_curator_chunk(
-            chunk_idx: int, start_idx: int, end_idx: int, chunk_results: list[BatchTaskResult]
-        ) -> tuple[int, int, int, list[dict]]:
-            ops = self._generate_curator_operations_for_chunk(
-                chunk_results, playbook_snapshot=snapshot_playbook
+            chunk_specs.append(
+                (chunk_idx, start_idx, end_idx, results_to_curate[start_idx:end_idx])
             )
-            return chunk_idx, start_idx, end_idx, ops
 
-        max_workers = max(1, min(num_chunks, 32))
-        chunk_results_ops: list[tuple[int, int, int, list[dict]]] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(_run_curator_chunk, *spec) for spec in chunk_specs
-            ]
-            for fut in as_completed(futures):
-                chunk_results_ops.append(fut.result())
+        print(
+            f"\nPHASE 2: Aggregation + Curator (curator_batch_size={curator_batch_size})"
+        )
 
-        chunk_results_ops.sort(key=lambda x: x[0])
-
-        for chunk_idx, start_idx, end_idx, ops in chunk_results_ops:
+        if self.curator_parallel and num_chunks > 1:
+            # ===========================================================
+            # PARALLEL Curator: snapshot + concurrent chunks + central merge
+            # ===========================================================
+            snapshot_playbook = self.playbook
+            snapshot_next_id = self.next_global_id
+            max_workers_cfg = self.curator_max_workers or num_chunks
+            max_workers_cfg = max(1, min(int(max_workers_cfg), num_chunks, 32))
             print(
-                f"\n--- Curator chunk {chunk_idx + 1}/{num_chunks} "
-                f"(samples {start_idx + 1}-{end_idx}) ---"
+                f"  Standard (PARALLEL): chunk by curator_batch_size={curator_batch_size} "
+                f"({len(results_to_curate)} samples, {num_chunks} chunks, "
+                f"max_workers={max_workers_cfg})"
             )
-            if ops:
-                print(f"  Chunk {chunk_idx + 1}: {len(ops)} curator operations")
-                self.playbook, self.next_global_id = apply_curator_operations(
-                    self.playbook, ops, self.next_global_id
-                )
-            else:
-                print(f"  Chunk {chunk_idx + 1}: 0 curator operations")
 
-        print(f"\n  Playbook updated after {num_chunks} Curator calls")
+            def _run_curator_chunk(
+                chunk_idx: int,
+                start_idx: int,
+                end_idx: int,
+                chunk_results: list[BatchTaskResult],
+            ) -> tuple[int, int, int, list[dict]]:
+                ops = self._generate_curator_operations_for_chunk(
+                    chunk_results,
+                    playbook_snapshot=snapshot_playbook,
+                    chunk_idx=chunk_idx,
+                    num_chunks=num_chunks,
+                )
+                return chunk_idx, start_idx, end_idx, ops or []
+
+            chunk_ops_results: list[list[dict]] = [[] for _ in range(num_chunks)]
+            with ThreadPoolExecutor(max_workers=max_workers_cfg) as executor:
+                futures = {
+                    executor.submit(_run_curator_chunk, *spec): spec[0]
+                    for spec in chunk_specs
+                }
+                for fut in as_completed(futures):
+                    chunk_idx = futures[fut]
+                    try:
+                        idx, start_idx, end_idx, ops = fut.result()
+                        chunk_ops_results[idx] = ops
+                        print(
+                            f"  Curator chunk {idx + 1}/{num_chunks} complete "
+                            f"(samples {start_idx + 1}-{end_idx}, {len(ops)} operations)"
+                        )
+                    except Exception as e:
+                        print(
+                            f"  [Phase2] Curator chunk {chunk_idx + 1}/{num_chunks} "
+                            f"failed: {e} - treating as 0 operations, continuing"
+                        )
+                        traceback.print_exc()
+                        chunk_ops_results[chunk_idx] = []
+
+            merged_ops: list[dict] = []
+            for ops in chunk_ops_results:
+                merged_ops.extend(ops)
+            self.playbook, self.next_global_id = apply_curator_operations(
+                snapshot_playbook, merged_ops, snapshot_next_id
+            )
+            print(
+                f"  Applied merged curator operations once: "
+                f"{len(merged_ops)} operations total"
+            )
+            self._phase2_maybe_merge_playbook()
+            print(
+                f"\n  Playbook updated after {num_chunks} parallel Curator calls"
+            )
+        else:
+            # ===========================================================
+            # SERIAL Curator (each chunk sees prior playbook updates)
+            # ===========================================================
+            print(
+                f"  Standard: chunk by curator_batch_size={curator_batch_size} "
+                f"({len(results_to_curate)} samples)"
+            )
+            print(
+                f"  Running Curator {num_chunks} times (each with up to "
+                f"{curator_batch_size} samples)"
+            )
+            for chunk_idx, start_idx, end_idx, chunk_results in chunk_specs:
+                print(
+                    f"\n--- Curator chunk {chunk_idx + 1}/{num_chunks} "
+                    f"(samples {start_idx + 1}-{end_idx}) ---"
+                )
+                try:
+                    ops = self._generate_curator_operations_for_chunk(
+                        chunk_results,
+                        playbook_snapshot=None,
+                        chunk_idx=chunk_idx,
+                        num_chunks=num_chunks,
+                    )
+                except Exception as e:
+                    print(
+                        f"  [Phase2] Curator chunk {chunk_idx + 1}/{num_chunks} "
+                        f"failed: {e} - skipping chunk, playbook unchanged, continuing"
+                    )
+                    traceback.print_exc()
+                    continue
+                if ops:
+                    print(f"  Chunk {chunk_idx + 1}: {len(ops)} curator operations")
+                    self.playbook, self.next_global_id = apply_curator_operations(
+                        self.playbook, ops, self.next_global_id
+                    )
+                else:
+                    print(f"  Chunk {chunk_idx + 1}: 0 curator operations")
+            self._phase2_maybe_merge_playbook()
+            print(f"\n  Playbook updated after {num_chunks} Curator calls")
+
         self._phase2_save_playbook()
 
     def _generate_curator_operations_for_chunk(
@@ -667,6 +814,8 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
         *,
         playbook_snapshot: str | None = None,
         guidebook_override: str | None = None,
+        chunk_idx: int | None = None,
+        num_chunks: int | None = None,
     ) -> list[dict]:
         """
         Generate curator ADD operations for a chunk of tasks (ace_batch style).
@@ -702,7 +851,12 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
             if guidebook_override is None:
                 reasoning_text = None
                 if self.use_reflector:
-                    reasoning_text = self._generate_reflection_for_task(result, playbook_override=pb)
+                    reasoning_text = self._generate_reflection_for_task(
+                        result,
+                        playbook_override=pb,
+                        parallel_chunk_idx=chunk_idx,
+                        parallel_num_chunks=num_chunks,
+                    )
                 combined_guidebooks.append(
                     f"{sample_label} {reasoning_text or 'N/A'}"
                 )
@@ -745,7 +899,13 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
         # Call curator LLM once for the entire chunk
         try:
             curator_raw = self.curator_model.generate(
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
+                extra_log_fields={
+                    "ace_role": "curator",
+                    "ace_stage": "phase2_batch",
+                    "chunk_idx": chunk_idx,
+                    "chunks_total": num_chunks,
+                },
             )
         except Exception as e:
             if is_context_length_api_exception(e):
@@ -828,7 +988,12 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
         return self._generate_curator_operations_for_chunk([result])
 
     def _generate_reflection_for_task(
-        self, result: BatchTaskResult, playbook_override: str | None = None
+        self,
+        result: BatchTaskResult,
+        playbook_override: str | None = None,
+        *,
+        parallel_chunk_idx: int | None = None,
+        parallel_num_chunks: int | None = None,
     ) -> str:
         """
         Generate reflector reasoning for a single task result.
@@ -855,6 +1020,12 @@ class ParallelReActStarAgent(SimplifiedReActStarAgent):
         filled_prompt += conversation_history
 
         message_ = self.reflector_model.generate(
-            messages=[{"role": "user", "content": filled_prompt}]
+            messages=[{"role": "user", "content": filled_prompt}],
+            extra_log_fields={
+                "ace_role": "reflector",
+                "ace_stage": "phase2_batch",
+                "chunk_idx": parallel_chunk_idx,
+                "chunks_total": parallel_num_chunks,
+            },
         )
         return message_.get("content", "")
