@@ -24,6 +24,14 @@ from openai import (
     RateLimitError,
     UnprocessableEntityError,
 )
+from httpx import (
+    ConnectTimeout,
+    ReadTimeout,
+    TimeoutException,
+    ConnectError,
+    ReadError,
+    WriteError,
+)
 from rich.panel import Panel
 
 from appworld import AppWorld
@@ -34,6 +42,7 @@ litellm.drop_params = True
 cache = Memory(os.path.join(path_store.cache, "llm_calls"), verbose=0)
 
 RETRY_ERROR = (
+    # OpenAI exceptions
     APIConnectionError,
     APIError,
     APIResponseValidationError,
@@ -48,6 +57,13 @@ RETRY_ERROR = (
     PermissionDeniedError,
     RateLimitError,
     UnprocessableEntityError,
+    # httpx exceptions for connection/timeout issues (e.g., SambaNova client)
+    ConnectTimeout,
+    ReadTimeout,
+    TimeoutException,
+    ConnectError,
+    ReadError,
+    WriteError,
 )
 CHAT_COMPLETION = {  # These are lambda so set environment variables take effect at runtime
     "openai": lambda: OpenAI(api_key="9b419298-ffce-4d50-a42c-0b4a0b911a89", base_url="https://api.sambanova.ai/v1").chat.completions.create,
@@ -145,7 +161,10 @@ def non_cached_chat_completion(
 
     if provider.strip().lower() == "sambanova":
         from sambanova import SambaNova
-        client = SambaNova()
+        import httpx
+        # Set longer timeout: 60s for connection, 600s for read/write
+        timeout = httpx.Timeout(60.0, connect=60.0, read=600.0, write=600.0)
+        client = SambaNova(timeout=timeout)
     elif provider.strip().lower() == "together":
         from together import Together
         client = Together()
@@ -310,7 +329,7 @@ class LiteLLMGenerator:
             return {"content": "", "tool_calls": [], "cost": 0}
 
         success = False
-        for _ in range(self.max_retries):
+        for attempt in range(self.max_retries):
             try:
                 arguments = {
                     "model": self.model,
@@ -330,7 +349,9 @@ class LiteLLMGenerator:
 
                     print(traceback.format_exc())
                     exit()
-                print(f"Encountered LM Error: {exception.message[:200].strip()}...")
+                error_msg = str(exception)[:200] if str(exception) else type(exception).__name__
+                print(f"Encountered LM Error: {error_msg.strip()}...")
+                print(f"Retrying... (Attempt {attempt + 1}/{self.max_retries})")
                 print(f"Will try again in {self.retry_after_n_seconds} seconds.")
                 time.sleep(self.retry_after_n_seconds)
                 pass
